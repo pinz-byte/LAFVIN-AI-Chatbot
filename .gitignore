@@ -12,6 +12,8 @@ __pycache__/
 
 # Hardware backups contain device-specific factory firmware and Wi-Fi state.
 factory-backups/
+/hardware-validation.json
+/factory-smoke-test.ok
 
 # Generated local ESP-IDF configuration; reviewed source config stays tracked.
 sdkconfig.symbios.local

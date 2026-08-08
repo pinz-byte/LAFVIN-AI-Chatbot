@@ -1,13 +1,19 @@
 # LAFVIN hardware and factory-firmware validation
 
-Status on 2026-08-08: **blocked at physical enumeration; no write was
-attempted**.
+Status on 2026-08-08: **hardware identity and factory backup passed; physical
+factory smoke test awaits user acknowledgement; no write was attempted**.
 
-The Mac USB device tree and `/dev/cu.*` inventory showed no CP210x, ESP32 USB
-JTAG/serial, `usbserial`, or `usbmodem` device. Only built-in Bluetooth/debug
-ports were present. This means the board was disconnected, unpowered, attached
-through a charge-only cable, or attached through an unenumerated hub. The
-factory firmware cannot yet be claimed as physically validated.
+The board enumerated through a Silicon Labs CP2102 USB-to-UART bridge. Read-only
+ESP ROM queries identified an ESP32-S3 QFN56 revision 0.2, 8 MB embedded PSRAM,
+a 40 MHz crystal, and 16 MB quad-I/O 3.3 V flash. The device-specific MAC is
+kept only in the ignored local report.
+
+The full 16,777,216-byte flash was read in independently checked 1 MiB chunks,
+assembled locally, and verified against its SHA-256. The backup and validation
+report are ignored because they can contain device identity, Wi-Fi credentials,
+and factory service tokens. Its partition table contains NVS, PHY, a factory
+application, and VFS data. The factory application metadata reports ESP-IDF
+4.4.1 and a June 18, 2022 build; its project and version fields are blank.
 
 ## Expected hardware identity
 
@@ -40,8 +46,14 @@ command. Before any custom flash, preserve the full 16 MB factory image:
 
 ```sh
 .venv-hardware/bin/python tools/validate_lafvin_factory.py \
+  --baud 230400 \
+  --chunk-size 0x100000 \
   --backup-dir factory-backups
 ```
+
+On this unit, long continuous reads were unreliable over the CP2102 link. The
+helper therefore reads the image in length-checked chunks with per-chunk
+retries before assembling it.
 
 Keep the generated SHA-256 and backup private: an unencrypted flash dump may
 contain Wi-Fi credentials and factory service tokens.
@@ -59,6 +71,13 @@ With the untouched factory image:
 6. Verify clean speaker playback and interruption/AEC behavior.
 7. Verify status, transcript, and expression updates on the display.
 8. Run the read-only identification/backup command and retain its report.
+
+After all eight checks pass, record the local review marker used by
+the pre-flash audit:
+
+```sh
+date -u > factory-smoke-test.ok
+```
 
 Any failure here is a hardware/factory baseline problem and should be resolved
 before evaluating Symbios firmware.

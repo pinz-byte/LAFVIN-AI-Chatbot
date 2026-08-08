@@ -9,9 +9,11 @@ voice gateway.
   ST7789 display.
 - Security boundary: the device holds only a device-scoped enrollment token;
   provider/API keys stay in the gateway environment.
-- Current safety state: no custom firmware has been flashed, the real gateway
-  URL is unset, and physical factory validation remains pending until the board
-  enumerates over USB.
+- Current safety state: no custom firmware has been flashed. The connected
+  board has been identified and its 16 MB factory image has been backed up
+  privately. The real gateway URL and physical display/wake/audio smoke-test
+  acknowledgement are intentionally still unset, so the pre-flash gate remains
+  blocked for review.
 
 Start with [the hardware validation report](docs/HARDWARE_VALIDATION.md), then
 use [the pre-flash review checklist](docs/PRE_FLASH_REVIEW.md).

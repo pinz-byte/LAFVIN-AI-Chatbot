@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import subprocess
 import sys
@@ -58,9 +60,24 @@ def main() -> int:
     if not validation.exists():
         failures.append("hardware-validation.json is missing")
     else:
-        text = validation.read_text()
-        if '"status": "identified-and-backed-up"' not in text:
-            failures.append("factory firmware has not been identified and backed up")
+        try:
+            report = json.loads(validation.read_text())
+        except (OSError, json.JSONDecodeError):
+            failures.append("hardware-validation.json is unreadable or invalid")
+        else:
+            if report.get("status") != "identified-and-backed-up":
+                failures.append("factory firmware has not been identified and backed up")
+            else:
+                backup = Path(str(report.get("backup_path", "")))
+                if not backup.is_file():
+                    failures.append("factory backup referenced by hardware-validation.json is missing")
+                elif backup.stat().st_size != 16 * 1024 * 1024:
+                    failures.append("factory backup is not exactly 16 MiB")
+                elif hashlib.sha256(backup.read_bytes()).hexdigest() != report.get("backup_sha256"):
+                    failures.append("factory backup SHA-256 does not match hardware-validation.json")
+
+    if not (ROOT / "factory-smoke-test.ok").exists():
+        failures.append("factory display/wake/audio smoke test has not been acknowledged")
 
     for path in ROOT.rglob("*"):
         if (
