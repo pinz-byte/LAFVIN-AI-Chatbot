@@ -1,7 +1,8 @@
 # LAFVIN hardware and factory-firmware validation
 
-Status on 2026-08-08: **hardware identity and factory backup passed; physical
-factory smoke test awaits user acknowledgement; no write was attempted**.
+Status on 2026-08-08: **hardware identity and factory backup passed; the
+installed factory application is an RGB-only demo with an integrity warning;
+no write was attempted**.
 
 The board enumerated through a Silicon Labs CP2102 USB-to-UART bridge. Read-only
 ESP ROM queries identified an ESP32-S3 QFN56 revision 0.2, 8 MB embedded PSRAM,
@@ -14,6 +15,20 @@ report are ignored because they can contain device identity, Wi-Fi credentials,
 and factory service tokens. Its partition table contains NVS, PHY, a factory
 application, and VFS data. The factory application metadata reports ESP-IDF
 4.4.1 and a June 18, 2022 build; its project and version fields are blank.
+
+A normal reset captured the following factory UART behavior:
+
+- The ROM loads the factory application from flash and reports `SHA-256
+  comparison failed`, then continues because the image permits booting anyway.
+- The application prints `RGB Demo` and repeatedly prints `50%R`, `50%G`, and
+  `50%B`, matching the observed red/green/blue LED cycle.
+- The LCD backlight receives power, but this RGB demo does not draw pixels or
+  exercise the microphone, codec, speaker, wake word, or conversation flow.
+
+The blank backlit LCD is therefore expected from the installed demo and is not,
+by itself, evidence of a failed display. Conversely, the factory image cannot
+be used to claim that those peripherals work. The app digest mismatch is also
+recorded as a factory-image integrity failure, even though the RGB loop runs.
 
 ## Expected hardware identity
 
@@ -59,6 +74,12 @@ Keep the generated SHA-256 and backup private: an unencrypted flash dump may
 contain Wi-Fi credentials and factory service tokens.
 
 ## Factory smoke test required before custom firmware
+
+The installed `RGB Demo` cannot satisfy this gate. Do not create the local
+acknowledgement marker based only on the LED cycle. A reviewer must first choose
+a non-persistent hardware diagnostic or explicitly authorize a controlled
+known-good baseline/custom flash. The private factory backup makes restoration
+possible, but restoring it would also restore its observed digest mismatch.
 
 With the untouched factory image:
 

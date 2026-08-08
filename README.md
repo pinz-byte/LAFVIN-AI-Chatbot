@@ -11,9 +11,11 @@ voice gateway.
   provider/API keys stay in the gateway environment.
 - Current safety state: no custom firmware has been flashed. The connected
   board has been identified and its 16 MB factory image has been backed up
-  privately. The real gateway URL and physical display/wake/audio smoke-test
-  acknowledgement are intentionally still unset, so the pre-flash gate remains
-  blocked for review.
+  privately. Its installed application identifies itself over UART as `RGB
+  Demo`; it cycles the onboard LED without driving the LCD and reports an app
+  SHA-256 mismatch at boot. The real gateway URL and a reviewed method for
+  validating display/wake/audio are intentionally still unset, so the pre-flash
+  gate remains blocked for review.
 
 Start with [the hardware validation report](docs/HARDWARE_VALIDATION.md), then
 use [the pre-flash review checklist](docs/PRE_FLASH_REVIEW.md).
