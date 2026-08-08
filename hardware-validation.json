@@ -1,0 +1,32 @@
+{
+  "checked_at": "2026-08-08T18:18:45.360494+00:00",
+  "ports": [
+    {
+      "device": "/dev/cu.debug-console",
+      "description": "n/a",
+      "manufacturer": null,
+      "vid": null,
+      "pid": null,
+      "likely_lafvin": false
+    },
+    {
+      "device": "/dev/cu.wlan-debug",
+      "description": "n/a",
+      "manufacturer": null,
+      "vid": null,
+      "pid": null,
+      "likely_lafvin": false
+    },
+    {
+      "device": "/dev/cu.Bluetooth-Incoming-Port",
+      "description": "n/a",
+      "manufacturer": null,
+      "vid": null,
+      "pid": null,
+      "likely_lafvin": false
+    }
+  ],
+  "selected_port": null,
+  "writes_performed": false,
+  "status": "no-device"
+}

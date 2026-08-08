@@ -1,0 +1,52 @@
+name: Validate Symbios Terminal
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/feat/symbios-voice-gateway
+
+permissions:
+  contents: read
+
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: gateway/pyproject.toml
+      - run: pip install -e '.[test]'
+      - run: pytest
+
+  firmware:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.2
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - lafvin-aichatbot
+          - lafvin-aichatbot-symbios-terminal
+    defaults:
+      run:
+        working-directory: xiaozhi-esp32-main
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ${{ matrix.variant }} without flashing
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          python3 scripts/release.py lafvin-aichatbot --name "${{ matrix.variant }}"
+      - name: Upload compile artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}-compile-only
+          path: xiaozhi-esp32-main/releases/*.zip
+          if-no-files-found: error
