@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from symbios_gateway.app import create_app
 from symbios_gateway.config import GatewaySettings
@@ -97,6 +98,35 @@ def test_session_tokens_expire() -> None:
     assert verify_session_token(secret, token, now=129)["sub"] == "device-1"
     with pytest.raises(TokenError, match="expired"):
         verify_session_token(secret, token, now=130)
+
+
+def test_websocket_requires_a_device_bound_bearer(settings: GatewaySettings) -> None:
+    from symbios_gateway.security import issue_session_token
+
+    store = GatewayStore(settings.database_path)
+    with TestClient(create_app(settings, store)) as client:
+        with pytest.raises(WebSocketDisconnect) as missing:
+            with client.websocket_connect("/xiaozhi/v1/"):
+                pass
+        assert missing.value.code == 4401
+
+        token = issue_session_token(
+            settings.jwt_secret,
+            device_id=DEVICE_HEADERS["Device-Id"],
+            client_id=DEVICE_HEADERS["Client-Id"],
+            ttl_seconds=30,
+        )
+        with pytest.raises(WebSocketDisconnect) as mismatched:
+            with client.websocket_connect(
+                "/xiaozhi/v1/",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Device-Id": "00:00:00:00:00:00",
+                    "Client-Id": DEVICE_HEADERS["Client-Id"],
+                },
+            ):
+                pass
+        assert mismatched.value.code == 4403
 
 
 def test_production_config_requires_tls(tmp_path: Path) -> None:
