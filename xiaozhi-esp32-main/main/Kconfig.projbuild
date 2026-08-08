@@ -6,6 +6,24 @@ config OTA_URL
     help
         The application will access this URL to check for new firmwares and server address.
 
+config SYMBIOS_VOICE_GATEWAY
+    bool "Use the authenticated Symbios voice gateway"
+    default n
+    help
+        Lock bootstrap and WebSocket discovery to the Symbios gateway. The
+        device enrolls once, stores only its device-scoped token in NVS, and
+        receives short-lived WebSocket credentials from the gateway. Provider
+        API keys remain on the gateway.
+
+config SYMBIOS_GATEWAY_URL
+    string "Symbios gateway bootstrap URL"
+    depends on SYMBIOS_VOICE_GATEWAY
+    default "https://symbios-gateway.invalid/xiaozhi/ota/"
+    help
+        HTTPS endpoint implementing the Xiaozhi OTA/bootstrap response shape.
+        Replace the .invalid review placeholder at build time. Do not put API
+        keys or shared provider credentials in this value.
+
 choice
     prompt "Flash Assets"
     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE

@@ -26,6 +26,15 @@
 
 
 Ota::Ota() {
+#ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
+    // Never reuse a WebSocket destination issued by the factory cloud. A
+    // fresh, short-lived destination and bearer token must come from Symbios.
+    Settings websocket_settings("websocket", true);
+    websocket_settings.SetString("url", "");
+    websocket_settings.SetString("token", "");
+    websocket_settings.SetInt("version", 0);
+#endif
+
 #ifdef ESP_EFUSE_BLOCK_USR_DATA
     // Read Serial Number from efuse user_data
     uint8_t serial_number[33] = {0};
@@ -44,12 +53,18 @@ Ota::~Ota() {
 }
 
 std::string Ota::GetCheckVersionUrl() {
+#ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
+    // A Symbios image is deliberately locked to its reviewed gateway. In
+    // particular, ignore an ota_url value left in NVS by factory firmware.
+    return CONFIG_SYMBIOS_GATEWAY_URL;
+#else
     Settings settings("wifi", false);
     std::string url = settings.GetString("ota_url");
     if (url.empty()) {
         url = CONFIG_OTA_URL;
     }
     return url;
+#endif
 }
 
 std::unique_ptr<Http> Ota::SetupHttp() {
@@ -67,6 +82,15 @@ std::unique_ptr<Http> Ota::SetupHttp() {
     http->SetHeader("User-Agent", user_agent);
     http->SetHeader("Accept-Language", Lang::CODE);
     http->SetHeader("Content-Type", "application/json");
+
+#ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
+    Settings settings("symbios", false);
+    std::string device_token = settings.GetString("device_token");
+    if (!device_token.empty()) {
+        http->SetHeader("Authorization", "Device " + device_token);
+    }
+    http->SetHeader("X-Symbios-Protocol", "1");
+#endif
 
     return http;
 }
@@ -145,6 +169,11 @@ esp_err_t Ota::CheckVersion() {
 
     has_mqtt_config_ = false;
     cJSON *mqtt = cJSON_GetObjectItem(root, "mqtt");
+#ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
+    if (cJSON_IsObject(mqtt)) {
+        ESP_LOGW(TAG, "Ignoring MQTT config: Symbios gateway requires authenticated WebSocket");
+    }
+#else
     if (cJSON_IsObject(mqtt)) {
         Settings settings("mqtt", true);
         cJSON *item = NULL;
@@ -163,10 +192,25 @@ esp_err_t Ota::CheckVersion() {
     } else {
         ESP_LOGI(TAG, "No mqtt section found !");
     }
+#endif
 
     has_websocket_config_ = false;
     cJSON *websocket = cJSON_GetObjectItem(root, "websocket");
     if (cJSON_IsObject(websocket)) {
+#ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
+        cJSON *url = cJSON_GetObjectItem(websocket, "url");
+        cJSON *token = cJSON_GetObjectItem(websocket, "token");
+        cJSON *version = cJSON_GetObjectItem(websocket, "version");
+        bool valid_url = cJSON_IsString(url) && strncmp(url->valuestring, "wss://", 6) == 0;
+        bool valid_token = cJSON_IsString(token) && strlen(token->valuestring) >= 32;
+        bool valid_version = !cJSON_IsNumber(version)
+            || (version->valueint >= 1 && version->valueint <= 3);
+        if (!valid_url || !valid_token || !valid_version) {
+            ESP_LOGE(TAG, "Symbios returned invalid WebSocket credentials");
+            cJSON_Delete(root);
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+#endif
         Settings settings("websocket", true);
         cJSON *item = NULL;
         cJSON_ArrayForEach(item, websocket) {
@@ -480,12 +524,40 @@ esp_err_t Ota::Activate() {
     
     auto status_code = http->GetStatusCode();
     if (status_code == 202) {
+        http->Close();
         return ESP_ERR_TIMEOUT;
     }
     if (status_code != 200) {
         ESP_LOGE(TAG, "Failed to activate, code: %d, body: %s", status_code, http->ReadAll().c_str());
+        http->Close();
         return ESP_FAIL;
     }
+
+#ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
+    std::string response = http->ReadAll();
+    http->Close();
+    cJSON *root = cJSON_Parse(response.c_str());
+    cJSON *symbios = root == nullptr ? nullptr : cJSON_GetObjectItem(root, "symbios");
+    cJSON *device_token = symbios == nullptr ? nullptr : cJSON_GetObjectItem(symbios, "device_token");
+    if (!cJSON_IsString(device_token)) {
+        ESP_LOGE(TAG, "Symbios activation response did not include a device token");
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    size_t token_length = strlen(device_token->valuestring);
+    if (token_length < 32 || token_length > 512) {
+        ESP_LOGE(TAG, "Symbios activation returned an invalid device token");
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    Settings settings("symbios", true);
+    settings.SetString("device_token", device_token->valuestring);
+    cJSON_Delete(root);
+#else
+    http->Close();
+#endif
 
     ESP_LOGI(TAG, "Activation successful");
     return ESP_OK;
