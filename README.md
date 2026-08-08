@@ -9,13 +9,13 @@ voice gateway.
   ST7789 display.
 - Security boundary: the device holds only a device-scoped enrollment token;
   provider/API keys stay in the gateway environment.
-- Current safety state: no custom firmware has been flashed. The connected
-  board has been identified and its 16 MB factory image has been backed up
-  privately. Its installed application identifies itself over UART as `RGB
-  Demo`; it cycles the onboard LED without driving the LCD and reports an app
-  SHA-256 mismatch at boot. The real gateway URL and a reviewed method for
-  validating display/wake/audio are intentionally still unset, so the pre-flash
-  gate remains blocked for review.
+- Current safety state: the connected board has been identified and its
+  original 16 MB `RGB Demo` image has been backed up privately. After explicit
+  approval, the unmodified LAFVIN Xiaozhi 2.2.4 baseline was flashed and passed
+  esptool write verification; its boot log initializes the LAFVIN display and
+  audio codecs and enters Wi-Fi provisioning. No Symbios firmware has been
+  flashed. The real gateway URL and physical display/wake/audio confirmation
+  remain unset, so the Symbios pre-flash gate is still blocked for review.
 
 Start with [the hardware validation report](docs/HARDWARE_VALIDATION.md), then
 use [the pre-flash review checklist](docs/PRE_FLASH_REVIEW.md).

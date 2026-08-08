@@ -31,8 +31,9 @@ application callbacks.
 ## Gates that must pass before flashing
 
 1. Connect the board with a data cable and finish
-   [HARDWARE_VALIDATION.md](HARDWARE_VALIDATION.md), including the factory
-   smoke test and full flash backup.
+   [HARDWARE_VALIDATION.md](HARDWARE_VALIDATION.md), including the private
+   original-image backup and physical smoke test on the explicitly approved
+   stock LAFVIN baseline.
 2. Deploy the gateway behind HTTPS/WSS and configure its server secrets.
 3. Generate a local firmware config with the real public endpoint:
 

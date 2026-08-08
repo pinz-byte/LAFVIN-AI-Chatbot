@@ -1,8 +1,9 @@
 # LAFVIN hardware and factory-firmware validation
 
-Status on 2026-08-08: **hardware identity and factory backup passed; the
-installed factory application is an RGB-only demo with an integrity warning;
-no write was attempted**.
+Status on 2026-08-08: **hardware identity and original-image backup passed; the
+original application was an RGB-only demo with an integrity warning; an
+explicitly approved stock LAFVIN baseline was flashed and boot-validated; no
+Symbios firmware was flashed**.
 
 The board enumerated through a Silicon Labs CP2102 USB-to-UART bridge. Read-only
 ESP ROM queries identified an ESP32-S3 QFN56 revision 0.2, 8 MB embedded PSRAM,
@@ -29,6 +30,28 @@ The blank backlit LCD is therefore expected from the installed demo and is not,
 by itself, evidence of a failed display. Conversely, the factory image cannot
 be used to claim that those peripherals work. The app digest mismatch is also
 recorded as a factory-image integrity failure, even though the RGB loop runs.
+
+## Controlled stock LAFVIN baseline
+
+The user explicitly approved replacing the RGB demo with the unmodified
+`lafvin-aichatbot` Xiaozhi 2.2.4 baseline. The exact CI artifact and extracted
+merged image were verified before writing:
+
+- Release archive SHA-256:
+  `4069048851783c00c44faf7fcd98271333baecddafee69549e4c954f0c458c5e`
+- Merged baseline SHA-256:
+  `b7583b236190743d48a9f84d6422c4ef3e0cc0118e636ac86f75959d77694688`
+- Embedded identity: project `xiaozhi`, version 2.2.4, board SKU
+  `lafvin-aichatbot`, ESP-IDF 5.5.2, 16 MB/DIO/80 MHz.
+- Esptool erased the incompatible original layout, wrote the merged image at
+  `0x0` at 230400 baud, verified the written-data hash, and hard-reset normally.
+
+The first stock boot completed without the original digest warning. Its UART
+log confirms 8 MB PSRAM, LCD/LVGL initialization, backlight at 75%, ES8311
+speaker and ES7210 microphone codec initialization, audio output enabled, and
+entry into Xiaozhi Wi-Fi provisioning mode. Visual output, audible playback,
+microphone capture, and wake behavior still require the user's direct physical
+confirmation.
 
 ## Expected hardware identity
 
@@ -75,11 +98,12 @@ contain Wi-Fi credentials and factory service tokens.
 
 ## Factory smoke test required before custom firmware
 
-The installed `RGB Demo` cannot satisfy this gate. Do not create the local
-acknowledgement marker based only on the LED cycle. A reviewer must first choose
-a non-persistent hardware diagnostic or explicitly authorize a controlled
-known-good baseline/custom flash. The private factory backup makes restoration
-possible, but restoring it would also restore its observed digest mismatch.
+The original `RGB Demo` could not satisfy this gate. The reviewer chose and
+explicitly authorized the controlled stock LAFVIN baseline described above.
+Complete the following checks against that stock baseline before creating the
+local acknowledgement marker. The private original-image backup makes
+restoration possible, but restoring it would also restore the observed digest
+mismatch.
 
 With the untouched factory image:
 
