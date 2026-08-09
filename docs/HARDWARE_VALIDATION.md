@@ -53,6 +53,20 @@ entry into Xiaozhi Wi-Fi provisioning mode. Visual output, audible playback,
 microphone capture, and wake behavior still require the user's direct physical
 confirmation.
 
+Physical observations after that boot:
+
+- **PASS — LCD:** the panel rendered the Wi-Fi Configuration Mode interface,
+  hotspot name, and configuration URL with correct orientation and backlight.
+- **PASS — provisioning:** a phone joined the device's local access point and
+  loaded its captive portal at `192.168.4.1`; no home-network password was
+  submitted.
+- **PASS — speaker:** after a power cycle, the speaker audibly announced entry
+  into Wi-Fi configuration mode.
+- **PENDING — microphone and local wake word:** the stock build points to the
+  Xiaozhi vendor service. Do not submit network credentials or send voice until
+  the reviewer explicitly accepts that external disclosure or an offline/
+  Symbios-backed test path is ready.
+
 ## Expected hardware identity
 
 The vendor documentation and LAFVIN source agree on the following target:

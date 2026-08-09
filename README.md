@@ -13,9 +13,11 @@ voice gateway.
   original 16 MB `RGB Demo` image has been backed up privately. After explicit
   approval, the unmodified LAFVIN Xiaozhi 2.2.4 baseline was flashed and passed
   esptool write verification; its boot log initializes the LAFVIN display and
-  audio codecs and enters Wi-Fi provisioning. No Symbios firmware has been
-  flashed. The real gateway URL and physical display/wake/audio confirmation
-  remain unset, so the Symbios pre-flash gate is still blocked for review.
+  audio codecs and enters Wi-Fi provisioning. Physical LCD, captive-portal, and
+  speaker tests pass; microphone and wake-word tests remain pending to avoid
+  sending audio to the vendor cloud. No Symbios firmware has been flashed. The
+  real gateway URL remains unset, so the Symbios pre-flash gate is still blocked
+  for review.
 
 Start with [the hardware validation report](docs/HARDWARE_VALIDATION.md), then
 use [the pre-flash review checklist](docs/PRE_FLASH_REVIEW.md).
