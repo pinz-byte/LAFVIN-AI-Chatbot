@@ -1,6 +1,9 @@
 # Symbios Terminal pre-flash review and flash record
 
-The reviewed image was **explicitly approved and flashed on 2026-08-09**.
+The first reviewed image was **explicitly approved and flashed on 2026-08-09**.
+Live activation exposed a serial-number-less board compatibility defect. A
+corrected replacement image has passed CI and is **awaiting review; it has not
+been flashed**.
 
 ## What changed
 
@@ -74,6 +77,42 @@ backlight at 75%, ES8311 speaker and ES7210 microphone initialization, and the
 `Xiaozhi-D215` provisioning portal at `192.168.4.1`. No crash, panic, or digest
 failure was observed. Physical microphone, local wake word, and a complete
 Symbios voice exchange remain pending until Wi-Fi provisioning and activation.
+
+## Activation finding and corrected replacement
+
+The device joined the provisioned 2.4 GHz network and displayed activation
+code `638327`. The code was approved successfully, but Cloud Run request logs
+then showed 28 `POST /xiaozhi/ota/activate` responses with HTTP 400 and no
+device-token exchange. Source inspection confirmed the device has no factory
+serial number in eFuse and the inherited activation helper therefore sent `{}`
+instead of the gateway challenge.
+
+Commit `73f7d03` fixes only the `CONFIG_SYMBIOS_VOICE_GATEWAY` path: it sends
+the random enrollment challenge even when the optional factory serial/HMAC
+material is absent. The stock activation implementation is unchanged, and the
+gateway still rejects a missing or mismatched challenge.
+
+GitHub Actions run `31325001210` passed the gateway tests and full ESP-IDF 5.5.2
+builds for both `lafvin-aichatbot` and
+`lafvin-aichatbot-symbios-terminal`. The CI-produced replacement is staged for
+review at:
+
+- archive: `firmware-review/73f7d03/v2.2.4_lafvin-aichatbot-symbios-terminal.zip`
+  (SHA-256 `f73ff91407dfbecb2bda4287b133e9247747c3ce928d09580aa5a68adadbf504`);
+- merged image: `firmware-review/73f7d03/image/merged-binary.bin`, 16,384,750
+  bytes (SHA-256
+  `60b1da1b70dd41721224cf5cdb41a3bf982a22e53b291c5ccb13293e7447c950`).
+
+The board still contains the previously flashed image with SHA-256
+`a6087b9add751a13c52e88ecc9ef8d49c3bf51a1da8d894c0e7d8e7f030479d5`.
+Do not flash the corrected image until its hash and this delta are explicitly
+approved. The expired activation code is not a credential and will be replaced
+after the corrected firmware boots.
+
+During activation handling, the gateway admin credential was rotated after a
+local client diagnostic exposed its old value. Cloud Run revision
+`symbios-voice-gateway-00006-8d9` serves 100% of traffic with secret version 2;
+version 1 is disabled. Device and provider credentials were not exposed.
 
 The tracked `.invalid` endpoint remains a deliberate safety catch. Production
 builds generate an ignored local config from an explicitly supplied HTTPS URL;
