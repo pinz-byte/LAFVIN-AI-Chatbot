@@ -248,6 +248,26 @@ markers, and no common API-key/token signatures.
 
 `tools/preflash_audit.py` remains fail-closed for the same documented reasons:
 the diagnostic deliberately changes `audio_service.cc` and the LAFVIN board
-source, and the factory wake/audio smoke acknowledgement is absent. This image
-has not been flashed. Explicit approval of the merged-image SHA-256 above is
-required before any write to the device.
+source, and the factory wake/audio smoke acknowledgement is absent.
+
+The user explicitly approved merged-image SHA-256
+`29e7bf6bffd717d068285e589610ed788431537bad6a0162c9aa59d3454a9c50`.
+Immediately before writing, the hash was rechecked, the live and reviewed
+partition tables matched byte-for-byte, and OTA metadata again reported
+sequence 1/state VALID with `ota_0` active at `0x20000`. The existing private
+NVS/OTA/PHY backup remained present with mode `0600` and its documented
+SHA-256.
+
+Only the 2,822,032-byte application image was extracted from the approved
+merged binary and written at `0x20000`. Its SHA-256 is
+`7ae4d13ab7879fb81ca76ee44c5bfe9ea6d1ac637c714914fcb7054f9247adeb`;
+esptool reported valid image checksum and validation hash, then verified the
+written-data hash and hard-reset normally. No full erase or write to NVS,
+OTA metadata, PHY data, bootloader, partition table, or assets was performed.
+
+Post-flash UART confirms compile time `Aug 9 2026 18:38:40`, ESP-IDF 5.5.2,
+the Symbios SKU, `ota_0`, retained Wi-Fi, the reviewed HTTPS endpoint,
+`Activation done`, the idle face, local WakeNet/AFE startup, and correctly
+formatted numeric input-level diagnostics. A physical DOWN/speak/DOWN exchange
+remains the final live acceptance test; opening a new serial-monitor window
+resets this board, so that test is deferred to uninterrupted user operation.
