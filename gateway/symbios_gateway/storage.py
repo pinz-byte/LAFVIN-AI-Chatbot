@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
 import secrets
 import sqlite3
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from .security import hash_device_token
 
@@ -19,6 +21,32 @@ class Enrollment:
     challenge: str
     expires_at: int
     approved: bool
+
+
+class Store(Protocol):
+    def close(self) -> None: ...
+
+    def authenticate(self, device_id: str, client_id: str, token: str) -> bool: ...
+
+    def get_or_create_enrollment(
+        self,
+        device_id: str,
+        client_id: str,
+        *,
+        ttl_seconds: int,
+        now: int | None = None,
+    ) -> Enrollment: ...
+
+    def approve(self, code: str, *, now: int | None = None) -> Enrollment | None: ...
+
+    def activate(
+        self,
+        device_id: str,
+        client_id: str,
+        challenge: str,
+        *,
+        now: int | None = None,
+    ) -> str | None: ...
 
 
 class GatewayStore:
@@ -126,17 +154,28 @@ class GatewayStore:
             row["approved"] = 1
         return self._to_enrollment(row)
 
-    def activate(self, device_id: str, client_id: str, *, now: int | None = None) -> str | None:
+    def activate(
+        self,
+        device_id: str,
+        client_id: str,
+        challenge: str,
+        *,
+        now: int | None = None,
+    ) -> str | None:
         current_time = int(time.time()) if now is None else now
         with self._lock, self._connection:
             row = self._connection.execute(
                 """
-                SELECT approved FROM pending_enrollments
+                SELECT approved, challenge FROM pending_enrollments
                 WHERE device_id = ? AND client_id = ? AND expires_at > ?
                 """,
                 (device_id, client_id, current_time),
             ).fetchone()
-            if row is None or not row["approved"]:
+            if (
+                row is None
+                or not row["approved"]
+                or not hmac.compare_digest(row["challenge"], challenge)
+            ):
                 return None
             token = secrets.token_urlsafe(32)
             token_hash = hash_device_token(token)
@@ -166,3 +205,176 @@ class GatewayStore:
             expires_at=int(row["expires_at"]),
             approved=bool(row["approved"]),
         )
+
+
+class FirestoreGatewayStore:
+    """Persistent enrollment store for horizontally scaled Cloud Run instances."""
+
+    def __init__(self, project: str) -> None:
+        from google.cloud import firestore
+
+        self._firestore = firestore
+        self._client = firestore.Client(project=project)
+        self._enrollments = self._client.collection("symbios_gateway_enrollments")
+        self._codes = self._client.collection("symbios_gateway_activation_codes")
+        self._devices = self._client.collection("symbios_gateway_devices")
+
+    @staticmethod
+    def _device_key(device_id: str, client_id: str) -> str:
+        material = f"{device_id}\0{client_id}".encode("utf-8")
+        return hashlib.sha256(material).hexdigest()
+
+    @staticmethod
+    def _to_enrollment(data: dict[str, object]) -> Enrollment:
+        return Enrollment(
+            device_id=str(data["device_id"]),
+            client_id=str(data["client_id"]),
+            code=str(data["code"]),
+            challenge=str(data["challenge"]),
+            expires_at=int(data["expires_at"]),
+            approved=bool(data.get("approved", False)),
+        )
+
+    def close(self) -> None:
+        self._client.close()
+
+    def authenticate(self, device_id: str, client_id: str, token: str) -> bool:
+        snapshot = self._devices.document(self._device_key(device_id, client_id)).get()
+        if not snapshot.exists:
+            return False
+        data = snapshot.to_dict() or {}
+        token_hash = data.get("token_hash")
+        return isinstance(token_hash, str) and hmac.compare_digest(
+            token_hash, hash_device_token(token)
+        )
+
+    def get_or_create_enrollment(
+        self,
+        device_id: str,
+        client_id: str,
+        *,
+        ttl_seconds: int,
+        now: int | None = None,
+    ) -> Enrollment:
+        current_time = int(time.time()) if now is None else now
+        device_key = self._device_key(device_id, client_id)
+        enrollment_ref = self._enrollments.document(device_key)
+
+        for _ in range(20):
+            code = f"{secrets.randbelow(1_000_000):06d}"
+            code_ref = self._codes.document(code)
+            transaction = self._client.transaction()
+
+            @self._firestore.transactional
+            def create(transaction):
+                existing = enrollment_ref.get(transaction=transaction)
+                old_code = None
+                if existing.exists:
+                    data = existing.to_dict() or {}
+                    if int(data.get("expires_at", 0)) > current_time:
+                        return data
+                    old_code = data.get("code")
+
+                existing_code = code_ref.get(transaction=transaction)
+                if existing_code.exists:
+                    return None
+                if isinstance(old_code, str):
+                    transaction.delete(self._codes.document(old_code))
+                data = {
+                    "device_id": device_id,
+                    "client_id": client_id,
+                    "code": code,
+                    "challenge": secrets.token_urlsafe(24),
+                    "expires_at": current_time + ttl_seconds,
+                    "approved": False,
+                }
+                transaction.set(enrollment_ref, data)
+                transaction.set(
+                    code_ref,
+                    {"device_key": device_key, "expires_at": current_time + ttl_seconds},
+                )
+                return data
+
+            data = create(transaction)
+            if data is not None:
+                return self._to_enrollment(data)
+        raise RuntimeError("could not allocate a unique enrollment code")
+
+    def approve(self, code: str, *, now: int | None = None) -> Enrollment | None:
+        current_time = int(time.time()) if now is None else now
+        code_ref = self._codes.document(code)
+        transaction = self._client.transaction()
+
+        @self._firestore.transactional
+        def approve(transaction):
+            code_snapshot = code_ref.get(transaction=transaction)
+            if not code_snapshot.exists:
+                return None
+            code_data = code_snapshot.to_dict() or {}
+            if int(code_data.get("expires_at", 0)) <= current_time:
+                transaction.delete(code_ref)
+                return None
+            device_key = code_data.get("device_key")
+            if not isinstance(device_key, str):
+                return None
+            enrollment_ref = self._enrollments.document(device_key)
+            snapshot = enrollment_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                transaction.delete(code_ref)
+                return None
+            data = snapshot.to_dict() or {}
+            if data.get("code") != code or int(data.get("expires_at", 0)) <= current_time:
+                transaction.delete(code_ref)
+                return None
+            data["approved"] = True
+            transaction.update(enrollment_ref, {"approved": True})
+            return data
+
+        data = approve(transaction)
+        return None if data is None else self._to_enrollment(data)
+
+    def activate(
+        self,
+        device_id: str,
+        client_id: str,
+        challenge: str,
+        *,
+        now: int | None = None,
+    ) -> str | None:
+        current_time = int(time.time()) if now is None else now
+        device_key = self._device_key(device_id, client_id)
+        enrollment_ref = self._enrollments.document(device_key)
+        device_ref = self._devices.document(device_key)
+        token = secrets.token_urlsafe(32)
+        transaction = self._client.transaction()
+
+        @self._firestore.transactional
+        def activate(transaction):
+            snapshot = enrollment_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                return False
+            data = snapshot.to_dict() or {}
+            stored_challenge = data.get("challenge")
+            if (
+                not data.get("approved")
+                or int(data.get("expires_at", 0)) <= current_time
+                or not isinstance(stored_challenge, str)
+                or not hmac.compare_digest(stored_challenge, challenge)
+            ):
+                return False
+            transaction.set(
+                device_ref,
+                {
+                    "device_id": device_id,
+                    "client_id": client_id,
+                    "token_hash": hash_device_token(token),
+                    "updated_at": current_time,
+                },
+            )
+            code = data.get("code")
+            if isinstance(code, str):
+                transaction.delete(self._codes.document(code))
+            transaction.delete(enrollment_ref)
+            return True
+
+        return token if activate(transaction) else None

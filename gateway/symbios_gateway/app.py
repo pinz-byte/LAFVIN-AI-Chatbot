@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import re
 import time
 from contextlib import asynccontextmanager
@@ -11,8 +12,10 @@ from websockets.asyncio.client import connect as connect_websocket
 from websockets.exceptions import ConnectionClosed
 
 from .config import GatewaySettings
+from .realtime import RealtimeBridgeError, run_openai_realtime_bridge
 from .security import TokenError, issue_session_token, verify_session_token
-from .storage import GatewayStore
+from .storage import FirestoreGatewayStore, GatewayStore, Store
+from .vertex import VertexLiveBridgeError, run_vertex_live_bridge
 
 
 IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9:._-]{3,128}$")
@@ -42,9 +45,16 @@ def _bearer_credential(authorization: str | None) -> str | None:
     return credential
 
 
-def create_app(settings: GatewaySettings | None = None, store: GatewayStore | None = None) -> FastAPI:
+def _create_store(settings: GatewaySettings) -> Store:
+    if settings.store_backend == "firestore":
+        assert settings.gcp_project is not None
+        return FirestoreGatewayStore(settings.gcp_project)
+    return GatewayStore(settings.database_path)
+
+
+def create_app(settings: GatewaySettings | None = None, store: Store | None = None) -> FastAPI:
     settings = settings or GatewaySettings.from_env()
-    store = store or GatewayStore(settings.database_path)
+    store = store or _create_store(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -55,6 +65,8 @@ def create_app(settings: GatewaySettings | None = None, store: GatewayStore | No
     app.state.settings = settings
     app.state.store = store
 
+    @app.get("/")
+    @app.get("/health")
     @app.get("/healthz")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -108,12 +120,23 @@ def create_app(settings: GatewaySettings | None = None, store: GatewayStore | No
 
     @app.post("/xiaozhi/ota/activate")
     async def activate(
+        request: Request,
         device_id_header: str | None = Header(default=None, alias="Device-Id"),
         client_id_header: str | None = Header(default=None, alias="Client-Id"),
     ) -> dict[str, dict[str, str]]:
         device_id = _identifier(device_id_header, "Device-Id")
         client_id = _identifier(client_id_header, "Client-Id")
-        token = store.activate(device_id, client_id)
+        body = await request.body()
+        if len(body) > 4 * 1024:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "activation payload too large")
+        try:
+            payload = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid activation payload")
+        challenge = payload.get("challenge") if isinstance(payload, dict) else None
+        if not isinstance(challenge, str) or not 16 <= len(challenge) <= 256:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid activation challenge")
+        token = store.activate(device_id, client_id, challenge)
         if token is None:
             raise HTTPException(status.HTTP_202_ACCEPTED, "activation pending")
         return {"symbios": {"device_token": token}}
@@ -139,7 +162,7 @@ def create_app(settings: GatewaySettings | None = None, store: GatewayStore | No
         }
 
     @app.websocket("/xiaozhi/v1/")
-    async def voice_proxy(websocket: WebSocket) -> None:
+    async def voice_gateway(websocket: WebSocket) -> None:
         authorization = websocket.headers.get("authorization")
         token = _bearer_credential(authorization)
         if token is None:
@@ -157,15 +180,42 @@ def create_app(settings: GatewaySettings | None = None, store: GatewayStore | No
             await websocket.close(code=4403, reason="device identity mismatch")
             return
 
-        upstream_headers = {
-            "Device-Id": device_id,
-            "Client-Id": client_id,
-            "Protocol-Version": websocket.headers.get("protocol-version", "1"),
-        }
-        if settings.upstream_authorization:
-            upstream_headers["Authorization"] = settings.upstream_authorization
-
         try:
+            if settings.voice_provider in {"openai_realtime", "vertex_live"}:
+                await websocket.accept()
+                try:
+                    raw_hello = await asyncio.wait_for(websocket.receive_text(), timeout=8)
+                    hello = json.loads(raw_hello)
+                    protocol_version = int(hello.get("version", 1))
+                    if hello.get("type") != "hello" or protocol_version not in {1, 2, 3}:
+                        raise ValueError("invalid Xiaozhi hello")
+                except (asyncio.TimeoutError, json.JSONDecodeError, TypeError, ValueError):
+                    await websocket.close(code=4400, reason="invalid Xiaozhi hello")
+                    return
+                if settings.voice_provider == "vertex_live":
+                    await run_vertex_live_bridge(
+                        websocket,
+                        settings,
+                        protocol_version=protocol_version,
+                    )
+                else:
+                    await run_openai_realtime_bridge(
+                        websocket,
+                        settings,
+                        device_id=device_id,
+                        client_id=client_id,
+                        protocol_version=protocol_version,
+                    )
+                return
+
+            upstream_headers = {
+                "Device-Id": device_id,
+                "Client-Id": client_id,
+                "Protocol-Version": websocket.headers.get("protocol-version", "1"),
+            }
+            if settings.upstream_authorization:
+                upstream_headers["Authorization"] = settings.upstream_authorization
+            assert settings.upstream_ws_url is not None
             async with connect_websocket(
                 settings.upstream_ws_url,
                 additional_headers=upstream_headers,
@@ -202,7 +252,13 @@ def create_app(settings: GatewaySettings | None = None, store: GatewayStore | No
                 await asyncio.gather(*pending, return_exceptions=True)
                 for task in done:
                     task.result()
-        except (OSError, ConnectionClosed, WebSocketDisconnect):
+        except (
+            OSError,
+            ConnectionClosed,
+            WebSocketDisconnect,
+            RealtimeBridgeError,
+            VertexLiveBridgeError,
+        ):
             if websocket.client_state.name == "CONNECTED":
                 await websocket.close(code=1011, reason="voice backend unavailable")
 

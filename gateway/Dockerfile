@@ -6,6 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY symbios_gateway ./symbios_gateway
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends libopus0 \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir .
 
 RUN useradd --create-home --uid 10001 gateway \

@@ -23,6 +23,7 @@ def settings(tmp_path: Path) -> GatewaySettings:
         jwt_secret="j" * 32,
         admin_token="a" * 32,
         upstream_ws_url="ws://upstream.test/xiaozhi/v1/",
+        voice_provider="proxy",
         database_path=tmp_path / "gateway.sqlite3",
         allow_insecure_urls=True,
     )
@@ -31,13 +32,19 @@ def settings(tmp_path: Path) -> GatewaySettings:
 def test_enrollment_bootstrap_and_short_lived_session(settings: GatewaySettings) -> None:
     store = GatewayStore(settings.database_path)
     with TestClient(create_app(settings, store)) as client:
+        assert client.get("/health").json() == {"status": "ok"}
+
         bootstrap = client.post("/xiaozhi/ota/", headers=DEVICE_HEADERS, json={"version": 2})
         assert bootstrap.status_code == 200
         activation = bootstrap.json()["activation"]
         assert len(activation["code"]) == 6
         assert "websocket" not in bootstrap.json()
 
-        pending = client.post("/xiaozhi/ota/activate", headers=DEVICE_HEADERS, json={})
+        pending = client.post(
+            "/xiaozhi/ota/activate",
+            headers=DEVICE_HEADERS,
+            json={"challenge": activation["challenge"]},
+        )
         assert pending.status_code == 202
 
         rejected = client.post(
@@ -53,7 +60,18 @@ def test_enrollment_bootstrap_and_short_lived_session(settings: GatewaySettings)
         assert approved.status_code == 200
         assert approved.json()["device_id"] == DEVICE_HEADERS["Device-Id"]
 
-        activated = client.post("/xiaozhi/ota/activate", headers=DEVICE_HEADERS, json={})
+        wrong_challenge = client.post(
+            "/xiaozhi/ota/activate",
+            headers=DEVICE_HEADERS,
+            json={"challenge": "wrong-challenge-value"},
+        )
+        assert wrong_challenge.status_code == 202
+
+        activated = client.post(
+            "/xiaozhi/ota/activate",
+            headers=DEVICE_HEADERS,
+            json={"challenge": activation["challenge"]},
+        )
         assert activated.status_code == 200
         device_token = activated.json()["symbios"]["device_token"]
         assert len(device_token) >= 32
@@ -136,5 +154,6 @@ def test_production_config_requires_tls(tmp_path: Path) -> None:
             jwt_secret="j" * 32,
             admin_token="a" * 32,
             upstream_ws_url="wss://upstream.test/xiaozhi/v1/",
+            voice_provider="proxy",
             database_path=tmp_path / "gateway.sqlite3",
         )

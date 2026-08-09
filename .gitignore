@@ -14,6 +14,7 @@ __pycache__/
 factory-backups/
 /hardware-validation.json
 /factory-smoke-test.ok
+/firmware-review/
 
 # Generated local ESP-IDF configuration; reviewed source config stays tracked.
 sdkconfig.symbios.local

@@ -1,6 +1,6 @@
 # Symbios Terminal pre-flash review
 
-This branch is intentionally **not flash-ready** yet.
+This branch is intentionally **not approved for flashing** yet.
 
 ## What changed
 
@@ -35,16 +35,32 @@ application callbacks.
    original-image backup and physical smoke test on the explicitly approved
    stock LAFVIN baseline.
 2. Deploy the gateway behind HTTPS/WSS and configure its server secrets.
-3. Generate a local firmware config with the real public endpoint:
+   **PASS:** Cloud Run revision `symbios-voice-gateway-00005-tk4` is serving the
+   authenticated Vertex Live bridge. Firestore persists enrollments, Secret
+   Manager holds the JWT/admin secrets, and Vertex uses the Cloud Run service
+   account rather than an API key.
+3. Generate a local firmware config with the reviewed public endpoint:
 
    ```sh
    python3 tools/configure_symbios_firmware.py \
-     --gateway-url https://your-gateway.example/xiaozhi/ota/
+     --gateway-url \
+       https://symbios-voice-gateway-hiz3vgfrfa-uc.a.run.app/xiaozhi/ota/
    ```
 
+   **PASS:** the generated local config contains this endpoint and no
+   credential.
 4. Build the Symbios variant and review the compiler/partition output.
+   **PASS:** Cloud Build `26efb7c3-2102-47ef-9c3d-7f2547c29fcc` used ESP-IDF
+   5.5.2, compiled the local wake-word/audio/display paths, left 32% of the app
+   partition free, and produced a merged image with SHA-256
+   `a6087b9add751a13c52e88ecc9ef8d49c3bf51a1da8d894c0e7d8e7f030479d5`.
 5. Run `python3 tools/preflash_audit.py`; it must report `PASS`.
+   **BLOCKED:** its only current failure is the missing acknowledgement for the
+   physical microphone and local wake-word smoke test.
 6. Review the produced binary hash and flash command manually.
+   **WAITING FOR REVIEW:** the binary exists locally under `firmware-review/`,
+   but no custom flash command has been run.
 
-The tracked `.invalid` endpoint is a deliberate safety catch. It prevents this
-review branch from accidentally contacting an unreviewed service.
+The tracked `.invalid` endpoint remains a deliberate safety catch. Production
+builds generate an ignored local config from an explicitly supplied HTTPS URL;
+this prevents a normal source checkout from accidentally contacting a service.

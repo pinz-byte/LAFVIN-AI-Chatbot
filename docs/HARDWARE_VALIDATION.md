@@ -49,9 +49,9 @@ merged image were verified before writing:
 The first stock boot completed without the original digest warning. Its UART
 log confirms 8 MB PSRAM, LCD/LVGL initialization, backlight at 75%, ES8311
 speaker and ES7210 microphone codec initialization, audio output enabled, and
-entry into Xiaozhi Wi-Fi provisioning mode. Visual output, audible playback,
-microphone capture, and wake behavior still require the user's direct physical
-confirmation.
+entry into Xiaozhi Wi-Fi provisioning mode. The user then directly confirmed
+the rendered provisioning interface and audible prompt; microphone capture and
+local wake behavior remain unverified.
 
 Physical observations after that boot:
 

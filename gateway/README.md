@@ -1,8 +1,9 @@
 # Symbios voice gateway
 
-This service is the authenticated boundary between a Symbios Terminal and a
-Xiaozhi-protocol-compatible voice backend. The ESP32 never receives the
-upstream provider credential.
+This service is the authenticated boundary between a Symbios Terminal and
+Vertex AI Gemini Live. It decodes the device's 16 kHz Xiaozhi Opus stream to
+PCM for the server-to-server Live WebSocket, then converts 24 kHz response PCM
+back to the device's 60 ms Opus frames. The ESP32 receives no provider key.
 
 ## Authentication flow
 
@@ -10,16 +11,34 @@ upstream provider credential.
    receives a six-digit activation code.
 2. An operator approves that code through the admin endpoint. The admin token
    is held by the server/operator, not by the device.
-3. The device polls `/xiaozhi/ota/activate` and receives a random,
-   device-scoped token. The gateway stores only its SHA-256 hash; the ESP32
-   stores the token in NVS.
+3. The device returns the random enrollment challenge while polling
+   `/xiaozhi/ota/activate` and receives a random, device-scoped token. The
+   challenge prevents a client with only a known device ID from racing an
+   approved activation. The gateway stores only the token's SHA-256 hash; the
+   ESP32 stores the token in NVS.
 4. Authenticated bootstrap exchanges that device token for a five-minute
    WebSocket JWT bound to both `Device-Id` and `Client-Id`.
-5. The gateway verifies the JWT and proxies Xiaozhi text and Opus binary frames
-   to the configured backend, adding the server-side upstream credential.
+5. The gateway verifies the JWT, opens a service-account-authenticated Vertex Live
+   session, and bridges Xiaozhi hello/listen/STT/TTS/audio events.
 
 TLS is mandatory in production. The gateway intentionally has no permissive
 or anonymous voice mode.
+
+## Production deployment
+
+The reviewed deployment is Cloud Run revision
+`symbios-voice-gateway-00005-tk4` at
+`https://symbios-voice-gateway-hiz3vgfrfa-uc.a.run.app`. Its `/health` route,
+enrollment flow, rejection of invalid admin credentials and mismatched device
+challenges, activation, device-token authentication, short-lived WebSocket JWT,
+and Vertex Live setup handshake have been exercised against production.
+Synthetic validation records were deleted afterward.
+
+Production uses Firestore for activation/device records so Cloud Run restarts
+and horizontal scaling do not lose enrollment. `SYMBIOS_JWT_SECRET` and
+`SYMBIOS_ADMIN_TOKEN` are injected from Secret Manager and are never returned
+by any gateway response. Vertex uses the Cloud Run service account and does not
+require an API key.
 
 ## Run locally
 
@@ -40,10 +59,11 @@ curl -X POST \
   "https://voice.example.com/admin/enroll/123456"
 ```
 
-The upstream endpoint must implement the Xiaozhi WebSocket protocol, including
-the hello, listen, STT, LLM, TTS, MCP, and Opus-frame behavior expected by the
-firmware. `SYMBIOS_UPSTREAM_AUTHORIZATION` is optional and is never returned by
-any gateway response.
+For compatibility testing, `SYMBIOS_VOICE_PROVIDER=proxy` still supports a
+reviewed Xiaozhi-compatible upstream configured with
+`SYMBIOS_UPSTREAM_WS_URL`; production is configured for `vertex_live`. An
+`openai_realtime` provider remains available but requires a funded server-side
+`OPENAI_API_KEY`.
 
 ## Test
 
