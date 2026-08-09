@@ -328,6 +328,39 @@ bootloader, partition table, and assets.
 `tools/preflash_audit.py` remains fail-closed for the same documented
 diagnostic exceptions: `audio_service.cc` and the LAFVIN board source differ
 from the vendor baseline, and the factory wake/audio smoke acknowledgement is
-absent. No flash has been performed for this candidate. The board still runs
-the explicitly approved manual-submit image with merged SHA-256
+absent. At this review stage, no flash had been performed for the candidate;
+the board still ran the explicitly approved manual-submit image with SHA-256
 `29e7bf6bffd717d068285e589610ed788431537bad6a0162c9aa59d3454a9c50`.
+
+## Session-refresh application flash and boot result
+
+The user explicitly approved merged-image SHA-256
+`bc0c96f262b2f4ce48e8045f596d9934a2e194b9a391116a55139e9ef484b630`.
+Immediately before writing, the downloaded merged image, the merged image
+inside the release archive, and the extracted application image were rehashed.
+All matched the reviewed values.
+
+The live ESP32-S3 reported revision v0.2, 8 MB PSRAM, and the expected device
+identity. Its partition table matched the reviewed partition table
+byte-for-byte. The initial OTA CRC helper incorrectly checked 28 bytes; source
+verification against ESP-IDF 5.5.2 showed that
+`bootloader_common_ota_select_crc()` covers only the four-byte `ota_seq`, with
+`UINT32_MAX` as the initial CRC. The corrected calculation matched stored CRC
+`0x4743989a`, and OTA metadata reported sequence 1/state VALID with `ota_0`
+active at `0x20000`.
+
+Only the 2,822,528-byte approved `xiaozhi.bin` was written at `0x20000`. Its
+SHA-256 is
+`884c03924e84f913f58d3b936615269fc07db8e8064efb80b2d8911332ba7e32`.
+Esptool erased only `0x20000` through `0x2d1fff`, wrote the image at 230400
+baud, verified the flash data hash, and hard-reset normally. NVS, Wi-Fi,
+activation, OTA metadata, PHY data, bootloader, partition table, and assets
+were not written.
+
+Post-flash UART confirms the reviewed compile time `Aug 9 2026 19:16:42`,
+ESP-IDF 5.5.2, the Symbios SKU, `ota_0`, 8 MB PSRAM, display/backlight, ES8311
+speaker and ES7210 microphone initialization, retained Wi-Fi, successful HTTPS
+bootstrap, `Activation done`, the idle state, and WakeNet/AFE startup. No crash,
+panic, digest failure, or new activation prompt occurred. A physical
+DOWN/speak/DOWN exchange remains the final live acceptance test for the new
+per-session credential refresh and end-to-end response.
