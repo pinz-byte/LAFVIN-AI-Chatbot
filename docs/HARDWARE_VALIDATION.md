@@ -1,9 +1,10 @@
 # LAFVIN hardware and factory-firmware validation
 
-Status on 2026-08-08: **hardware identity and original-image backup passed; the
+Status on 2026-08-09: **hardware identity and original-image backup passed; the
 original application was an RGB-only demo with an integrity warning; an
-explicitly approved stock LAFVIN baseline was flashed and boot-validated; no
-Symbios firmware was flashed**.
+explicitly approved stock LAFVIN baseline was flashed and physically checked;
+the subsequently approved Symbios image was hash-verified, flashed, and
+boot-validated**.
 
 The board enumerated through a Silicon Labs CP2102 USB-to-UART bridge. Read-only
 ESP ROM queries identified an ESP32-S3 QFN56 revision 0.2, 8 MB embedded PSRAM,
@@ -66,6 +67,30 @@ Physical observations after that boot:
   Xiaozhi vendor service. Do not submit network credentials or send voice until
   the reviewer explicitly accepts that external disclosure or an offline/
   Symbios-backed test path is ready.
+
+## Approved Symbios image
+
+After the stock-cloud disclosure concern and remaining mic/wake test were
+reported, the user explicitly approved the reviewed Symbios image. Immediately
+before flashing, its SHA-256 was rechecked as
+`a6087b9add751a13c52e88ecc9ef8d49c3bf51a1da8d894c0e7d8e7f030479d5`.
+The same ESP32-S3 target, 8 MB PSRAM, and 16 MB flash were re-identified.
+
+Esptool then erased the stock image, wrote the 16,384,752-byte merged image at
+`0x0` at 230400 baud using DIO/80 MHz/16 MB settings, verified the data hash,
+and hard-reset the board. The first UART boot confirms:
+
+- project `xiaozhi`, version 2.2.4, ESP-IDF 5.5.2;
+- SKU `lafvin-aichatbot-symbios-terminal`;
+- 8 MB PSRAM and normal partition/application startup;
+- LVGL/ST7789 display initialization and backlight at 75%;
+- ES8311 speaker and ES7210 microphone initialization;
+- entry into the `Xiaozhi-D215` Wi-Fi configuration portal at `192.168.4.1`;
+- no crash, panic, digest warning, or boot loop.
+
+The next physical checks are the rendered provisioning screen and audible
+prompt, followed by 2.4 GHz Wi-Fi provisioning, Symbios activation, microphone
+capture, local wake word, playback, and interruption behavior.
 
 ## Expected hardware identity
 

@@ -1,6 +1,6 @@
-# Symbios Terminal pre-flash review
+# Symbios Terminal pre-flash review and flash record
 
-This branch is intentionally **not approved for flashing** yet.
+The reviewed image was **explicitly approved and flashed on 2026-08-09**.
 
 ## What changed
 
@@ -55,11 +55,25 @@ application callbacks.
    partition free, and produced a merged image with SHA-256
    `a6087b9add751a13c52e88ecc9ef8d49c3bf51a1da8d894c0e7d8e7f030479d5`.
 5. Run `python3 tools/preflash_audit.py`; it must report `PASS`.
-   **BLOCKED:** its only current failure is the missing acknowledgement for the
-   physical microphone and local wake-word smoke test.
+   **DEFERRED AT APPROVAL:** the audit reported only the missing physical
+   microphone/local-wake acknowledgement. The user then explicitly approved
+   flashing; the stock vendor-cloud audio test remained deferred to avoid
+   disclosing voice data to that service. These checks now move to the
+   Symbios-backed post-flash validation.
 6. Review the produced binary hash and flash command manually.
-   **WAITING FOR REVIEW:** the binary exists locally under `firmware-review/`,
-   but no custom flash command has been run.
+   **PASS:** the reviewed SHA-256 matched immediately before flashing. Esptool
+   identified the ESP32-S3 with 8 MB PSRAM and 16 MB flash, erased the stock
+   layout, wrote 16,384,752 bytes at `0x0` using DIO/80 MHz/16 MB settings,
+   verified the written-data hash, and hard-reset normally.
+
+## First post-flash boot
+
+UART confirms project `xiaozhi` 2.2.4, ESP-IDF 5.5.2, SKU
+`lafvin-aichatbot-symbios-terminal`, 8 MB PSRAM, LVGL display startup,
+backlight at 75%, ES8311 speaker and ES7210 microphone initialization, and the
+`Xiaozhi-D215` provisioning portal at `192.168.4.1`. No crash, panic, or digest
+failure was observed. Physical microphone, local wake word, and a complete
+Symbios voice exchange remain pending until Wi-Fi provisioning and activation.
 
 The tracked `.invalid` endpoint remains a deliberate safety catch. Production
 builds generate an ignored local config from an explicitly supplied HTTPS URL;
