@@ -2,6 +2,16 @@ name: Validate Symbios Terminal
 
 on:
   workflow_dispatch:
+    inputs:
+      gateway_url:
+        description: Public Symbios gateway bootstrap URL for a review image
+        required: false
+        type: string
+      lafvin_audio_diagnostic:
+        description: Enable local-only LAFVIN microphone diagnostics
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - codex/feat/symbios-voice-gateway
@@ -49,4 +59,45 @@ jobs:
         with:
           name: ${{ matrix.variant }}-compile-only
           path: xiaozhi-esp32-main/releases/*.zip
+          if-no-files-found: error
+
+  firmware-review:
+    if: github.event_name == 'workflow_dispatch' && inputs.gateway_url != ''
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.2
+    defaults:
+      run:
+        working-directory: xiaozhi-esp32-main
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build endpoint-injected review image without flashing
+        shell: bash
+        env:
+          GATEWAY_URL: ${{ inputs.gateway_url }}
+          LAFVIN_AUDIO_DIAGNOSTIC: ${{ inputs.lafvin_audio_diagnostic }}
+        run: |
+          . /opt/esp/idf/export.sh
+          diagnostic_args=()
+          if [[ "$LAFVIN_AUDIO_DIAGNOSTIC" == "true" ]]; then
+            diagnostic_args+=(--lafvin-audio-diagnostic)
+          fi
+          python3 ../tools/configure_symbios_firmware.py \
+            --gateway-url "$GATEWAY_URL" \
+            "${diagnostic_args[@]}"
+          python3 scripts/release.py lafvin-aichatbot \
+            -c config.symbios.local.json \
+            --name lafvin-aichatbot-symbios-terminal
+          sha256sum \
+            build/merged-binary.bin \
+            releases/v2.2.4_lafvin-aichatbot-symbios-terminal.zip \
+            > firmware-review-sha256.txt
+      - name: Upload review artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lafvin-aichatbot-symbios-diagnostic-review
+          path: |
+            xiaozhi-esp32-main/build/merged-binary.bin
+            xiaozhi-esp32-main/build/flasher_args.json
+            xiaozhi-esp32-main/firmware-review-sha256.txt
+            xiaozhi-esp32-main/releases/v2.2.4_lafvin-aichatbot-symbios-terminal.zip
           if-no-files-found: error

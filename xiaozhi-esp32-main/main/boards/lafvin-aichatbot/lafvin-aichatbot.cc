@@ -65,6 +65,9 @@ private:
     i2c_master_bus_handle_t i2c_bus_;
     // i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
+#if CONFIG_LAFVIN_AUDIO_DIAGNOSTIC
+    Button down_button_;
+#endif
     Display* display_;
     Camera* camera_ = nullptr;
     // Pca9557* pca9557_;
@@ -127,6 +130,13 @@ private:
             }
             app.ToggleChatState();
         });
+
+#if CONFIG_LAFVIN_AUDIO_DIAGNOSTIC
+        down_button_.OnClick([]() {
+            ESP_LOGI(TAG, "DOWN button: toggling chat state");
+            Application::GetInstance().ToggleChatState();
+        });
+#endif
 
 #if CONFIG_USE_DEVICE_AEC
         boot_button_.OnDoubleClick([this]() {
@@ -264,7 +274,11 @@ private:
     }
 
 public:
-    LichuangDevBoard() : boot_button_(BOOT_BUTTON_GPIO) {
+    LichuangDevBoard() : boot_button_(BOOT_BUTTON_GPIO)
+#if CONFIG_LAFVIN_AUDIO_DIAGNOSTIC
+        , down_button_(GPIO_NUM_19)
+#endif
+    {
         InitializeI2c();
         InitializeSpi();
         InitializeSt7789Display();

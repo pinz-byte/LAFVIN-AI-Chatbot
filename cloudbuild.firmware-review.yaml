@@ -5,8 +5,13 @@ steps:
       - -ceu
       - |
         . /opt/esp/idf/export.sh
+        diagnostic_args=()
+        if [[ "${_LAFVIN_AUDIO_DIAGNOSTIC}" == "true" ]]; then
+          diagnostic_args+=(--lafvin-audio-diagnostic)
+        fi
         python3 tools/configure_symbios_firmware.py \
-          --gateway-url "${_GATEWAY_URL}"
+          --gateway-url "${_GATEWAY_URL}" \
+          "${diagnostic_args[@]}"
         cd xiaozhi-esp32-main
         python3 scripts/release.py lafvin-aichatbot \
           -c config.symbios.local.json \
@@ -29,3 +34,6 @@ options:
   machineType: E2_HIGHCPU_8
 
 timeout: 1800s
+
+substitutions:
+  _LAFVIN_AUDIO_DIAGNOSTIC: "false"

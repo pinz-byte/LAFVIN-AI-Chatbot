@@ -30,19 +30,28 @@ def validate_gateway_url(value: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gateway-url", required=True, type=validate_gateway_url)
+    parser.add_argument(
+        "--lafvin-audio-diagnostic",
+        action="store_true",
+        help="enable local input-level logs and the GPIO19 DOWN-button trigger",
+    )
     args = parser.parse_args()
+
+    sdkconfig_append = [
+        "CONFIG_USE_DEVICE_AEC=y",
+        "CONFIG_LANGUAGE_EN_US=y",
+        "CONFIG_SYMBIOS_VOICE_GATEWAY=y",
+        f'CONFIG_SYMBIOS_GATEWAY_URL="{args.gateway_url}"',
+    ]
+    if args.lafvin_audio_diagnostic:
+        sdkconfig_append.append("CONFIG_LAFVIN_AUDIO_DIAGNOSTIC=y")
 
     config = {
         "target": "esp32s3",
         "builds": [
             {
                 "name": "lafvin-aichatbot-symbios-terminal",
-                "sdkconfig_append": [
-                    "CONFIG_USE_DEVICE_AEC=y",
-                    "CONFIG_LANGUAGE_EN_US=y",
-                    "CONFIG_SYMBIOS_VOICE_GATEWAY=y",
-                    f'CONFIG_SYMBIOS_GATEWAY_URL="{args.gateway_url}"',
-                ],
+                "sdkconfig_append": sdkconfig_append,
             }
         ],
     }

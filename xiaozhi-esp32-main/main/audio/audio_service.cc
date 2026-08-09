@@ -216,6 +216,48 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     last_input_time_ = std::chrono::steady_clock::now();
     debug_statistics_.input_count++;
 
+#if CONFIG_LAFVIN_AUDIO_DIAGNOSTIC
+    // Local-only aggregate levels help distinguish silent capture from a wake-model failure.
+    // Never log or persist raw samples.
+    constexpr size_t kDiagnosticChannels = 2;
+    static uint64_t absolute_sum[kDiagnosticChannels] = {};
+    static uint32_t peak[kDiagnosticChannels] = {};
+    static uint32_t frames_accumulated = 0;
+
+    const size_t input_channels = codec_->input_channels();
+    const size_t reported_channels = input_channels < kDiagnosticChannels
+        ? input_channels : kDiagnosticChannels;
+    const size_t frames = input_channels == 0 ? 0 : data.size() / input_channels;
+    for (size_t frame = 0; frame < frames; ++frame) {
+        for (size_t channel = 0; channel < reported_channels; ++channel) {
+            const int32_t sample = data[frame * input_channels + channel];
+            const uint32_t magnitude = sample < 0
+                ? static_cast<uint32_t>(-sample)
+                : static_cast<uint32_t>(sample);
+            absolute_sum[channel] += magnitude;
+            if (magnitude > peak[channel]) {
+                peak[channel] = magnitude;
+            }
+        }
+    }
+    frames_accumulated += frames;
+
+    if (frames_accumulated >= static_cast<uint32_t>(sample_rate)) {
+        const unsigned long long channel_0_mean = reported_channels > 0
+            ? static_cast<unsigned long long>(absolute_sum[0] / frames_accumulated) : 0;
+        const unsigned long long channel_1_mean = reported_channels > 1
+            ? static_cast<unsigned long long>(absolute_sum[1] / frames_accumulated) : 0;
+        ESP_LOGI(TAG,
+            "Local input levels: channels=%u ch0_mean_abs=%llu ch0_peak=%u ch1_mean_abs=%llu ch1_peak=%u",
+            static_cast<unsigned>(input_channels), channel_0_mean, peak[0], channel_1_mean, peak[1]);
+        for (size_t channel = 0; channel < kDiagnosticChannels; ++channel) {
+            absolute_sum[channel] = 0;
+            peak[channel] = 0;
+        }
+        frames_accumulated = 0;
+    }
+#endif
+
 #if CONFIG_USE_AUDIO_DEBUGGER
     // 音频调试：发送原始音频数据
     if (audio_debugger_ == nullptr) {

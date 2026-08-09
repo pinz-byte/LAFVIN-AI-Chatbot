@@ -24,6 +24,16 @@ config SYMBIOS_GATEWAY_URL
         Replace the .invalid review placeholder at build time. Do not put API
         keys or shared provider credentials in this value.
 
+config LAFVIN_AUDIO_DIAGNOSTIC
+    bool "Enable local-only LAFVIN microphone diagnostics"
+    depends on BOARD_TYPE_LAFVIN_AICHATBOT
+    default n
+    help
+        Log aggregate input amplitude for each configured audio channel once
+        per second and map the documented DOWN button on GPIO19 to the normal
+        chat-state toggle. No raw audio or credentials are logged. Leave this
+        disabled in production firmware.
+
 choice
     prompt "Flash Assets"
     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE
