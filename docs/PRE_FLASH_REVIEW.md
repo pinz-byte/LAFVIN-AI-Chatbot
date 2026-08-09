@@ -1,9 +1,10 @@
 # Symbios Terminal pre-flash review and flash record
 
-The first reviewed image was **explicitly approved and flashed on 2026-08-09**.
-Live activation exposed a serial-number-less board compatibility defect. A
-corrected replacement image has passed CI and is **awaiting review; it has not
-been flashed**.
+The first reviewed image and its endpoint-injected correction were **explicitly
+approved and flashed on 2026-08-09**. Activation now succeeds and survives a
+reboot. Local microphone/wake behavior remains unresolved. A narrowly scoped
+diagnostic image has passed CI and is **awaiting review; it has not been
+flashed**.
 
 ## What changed
 
@@ -17,9 +18,9 @@ been flashed**.
 - Added a server-side gateway that validates the device JWT and injects any
   upstream provider credential from server environment only.
 
-## What was deliberately preserved
+## What was deliberately preserved in the production image
 
-No changes were made to:
+Before the separate diagnostic described below, no changes were made to:
 
 - `main/boards/lafvin-aichatbot/lafvin-aichatbot.cc` or its pin map
   `config.h`;
@@ -124,10 +125,13 @@ finding no `.invalid` endpoint. The production replacement staged for review is:
   16,384,750 bytes (SHA-256
   `9acfdb147838e8d48c5d79874455720582ade950fe6356d8f70326d1a9b97466`).
 
-The board currently contains the generic safety image with SHA-256
-`60b1da1b70dd41721224cf5cdb41a3bf982a22e53b291c5ccb13293e7447c950`.
-The endpoint-injected production image has not been flashed and requires a new
-explicit hash approval.
+The user explicitly approved the endpoint-injected image by its SHA-256. It was
+erased, written at 230400 baud, verified by esptool, and rebooted normally.
+Activation code `286697` was approved through the gateway. Firestore recorded
+the device-token exchange, and a later UART reboot showed `Activation done`
+followed by the idle state without another activation loop. The board currently
+contains this production image with SHA-256
+`9acfdb147838e8d48c5d79874455720582ade950fe6356d8f70326d1a9b97466`.
 
 During activation handling, the gateway admin credential was rotated after a
 local client diagnostic exposed its old value. Cloud Run revision
@@ -137,3 +141,42 @@ version 1 is disabled. Device and provider credentials were not exposed.
 The tracked `.invalid` endpoint remains a deliberate safety catch. Production
 builds generate an ignored local config from an explicitly supplied HTTPS URL;
 this prevents a normal source checkout from accidentally contacting a service.
+
+## Local microphone diagnostic awaiting review
+
+The idle face, display, speaker, Wi-Fi, authenticated activation, and token
+persistence are healthy. UART confirms the local AFE starts with one microphone
+plus one playback/reference channel and loads `wn9_nihaoxiaozhi_tts` (Mandarin
+`你好小智`), not the older documented English `Hi ESP` model. Neither repeated
+live speech nor controlled macOS Mandarin TTS produced a WakeNet event. The
+small BOOT button also produced no listening-state change.
+
+Commit `cec5828` adds a build-gated diagnostic that is disabled by default:
+
+- once per second, it logs only per-channel mean absolute amplitude and peak;
+  it never logs or persists raw audio;
+- it maps the vendor-documented DOWN button on GPIO19 to the existing
+  `ToggleChatState()` behavior;
+- it does not change the endpoint, enrollment, display, speaker, codec pin map,
+  provider credentials, or gateway authentication.
+
+GitHub Actions run `31328494140` passed gateway tests and ESP-IDF 5.5.2 builds
+for the stock LAFVIN variant, the normal Symbios variant, and the
+endpoint-injected diagnostic variant. Builder, local, and archive checksums all
+match. Binary inspection finds exactly one reviewed gateway URL, both diagnostic
+markers, no `.invalid` URL, and no common OpenAI/Google API-key signatures.
+
+- archive:
+  `firmware-review/cec5828-diagnostic/releases/v2.2.4_lafvin-aichatbot-symbios-terminal.zip`
+  (SHA-256 `d42a6f9c3c152cf98fdc23c1b097f16f74c5fee82b1ffa3d763261e4616322fd`);
+- merged image:
+  `firmware-review/cec5828-diagnostic/build/merged-binary.bin`, 16,384,750 bytes
+  (SHA-256
+  `961732b84bb67764a3bc9aa7b5c9287953718aba21f9f20519b042e9315e9a60`).
+
+`tools/preflash_audit.py` remains fail-closed: it reports the two deliberate
+protected-path changes (`audio_service.cc` and the LAFVIN board source) and the
+still-missing factory wake/audio smoke acknowledgement. Therefore the
+diagnostic image requires explicit hash approval as a documented exception.
+It has **not** been flashed; the current production image remains recoverable
+and unchanged.
