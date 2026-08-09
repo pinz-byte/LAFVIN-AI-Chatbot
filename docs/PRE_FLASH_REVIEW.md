@@ -364,3 +364,22 @@ bootstrap, `Activation done`, the idle state, and WakeNet/AFE startup. No crash,
 panic, digest failure, or new activation prompt occurred. A physical
 DOWN/speak/DOWN exchange remains the final live acceptance test for the new
 per-session credential refresh and end-to-end response.
+
+## Manual activity-boundary gateway correction
+
+The physical post-flash test confirmed that the per-session credential refresh
+works. Cloud Run revision `symbios-voice-gateway-00009-6b8` accepted the fresh
+WebSocket and recorded `listen.start`, 127 Opus frames decoded to 243,840 PCM
+bytes, and `listen.stop`. Aggregate input levels were mean absolute amplitude
+340 and peak 4,457. The second DOWN press therefore reached the gateway; the
+device's immediate standby display is its expected local post-submit state.
+Vertex returned no transcription, response audio, or turn-complete event.
+
+The gateway had left Vertex automatic activity detection enabled and converted
+the physical stop into `audio_stream_end`. A direct Vertex probe using
+synthesized speech scaled to comparable levels (mean 360, peak 4,197) completed
+successfully when automatic activity detection was disabled and the turn was
+bounded by explicit `activity_start` and `activity_end` events. The staged
+gateway-only correction applies those deterministic push-to-talk boundaries.
+It does not change or reflash firmware, retain raw audio, expose credentials,
+or alter the reviewed gateway URL.

@@ -87,6 +87,9 @@ def _vertex_setup(settings: GatewaySettings) -> str:
                 },
                 "input_audio_transcription": {},
                 "output_audio_transcription": {},
+                "realtime_input_config": {
+                    "automatic_activity_detection": {"disabled": True}
+                },
                 "context_window_compression": {"sliding_window": {}},
             }
         },
@@ -118,10 +121,18 @@ async def _handle_vertex_listen_event(
     listen_state = event.get("state")
     if listen_state == "start":
         state.discard_output = False
+        was_listening = state.listening
         state.listening = True
         _reset_vertex_audio_metrics(state)
         codec.clear_output()
         logger.info("Vertex listen started")
+        if not was_listening:
+            await upstream.send(
+                json.dumps(
+                    {"realtime_input": {"activity_start": {}}},
+                    separators=(",", ":"),
+                )
+            )
     elif listen_state == "stop":
         was_listening = state.listening
         state.listening = False
@@ -133,11 +144,12 @@ async def _handle_vertex_listen_event(
             state.input_peak,
         )
         if was_listening:
-            # Vertex automatic VAD requires AudioStreamEnd when the microphone
-            # stream is paused so cached audio is flushed and the turn can finish.
+            # The LAFVIN DOWN button provides the authoritative push-to-talk
+            # boundary. Explicit activity events avoid depending on Vertex VAD
+            # to recognize this board's attenuated microphone signal.
             await upstream.send(
                 json.dumps(
-                    {"realtime_input": {"audio_stream_end": True}},
+                    {"realtime_input": {"activity_end": {}}},
                     separators=(",", ":"),
                 )
             )

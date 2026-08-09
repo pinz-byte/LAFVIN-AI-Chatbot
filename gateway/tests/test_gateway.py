@@ -1,5 +1,6 @@
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from symbios_gateway.vertex import (
     _handle_vertex_listen_event,
     _record_vertex_input_pcm,
     _vertex_input_mean_abs,
+    _vertex_setup,
 )
 
 
@@ -167,7 +169,17 @@ def test_production_config_requires_tls(tmp_path: Path) -> None:
         )
 
 
-def test_vertex_manual_stop_flushes_the_audio_stream() -> None:
+def test_vertex_setup_uses_explicit_activity_boundaries(settings: GatewaySettings) -> None:
+    setup = json.loads(
+        _vertex_setup(replace(settings, gcp_project="test-project"))
+    )["setup"]
+
+    assert setup["realtime_input_config"] == {
+        "automatic_activity_detection": {"disabled": True}
+    }
+
+
+def test_vertex_manual_turn_sends_explicit_activity_boundaries() -> None:
     class Upstream:
         def __init__(self) -> None:
             self.messages: list[str] = []
@@ -193,6 +205,9 @@ def test_vertex_manual_stop_flushes_the_audio_stream() -> None:
     )
     assert state.listening is True
     assert codec.clear_count == 1
+    assert json.loads(upstream.messages[-1]) == {
+        "realtime_input": {"activity_start": {}}
+    }
 
     asyncio.run(
         _handle_vertex_listen_event(
@@ -201,7 +216,7 @@ def test_vertex_manual_stop_flushes_the_audio_stream() -> None:
     )
     assert state.listening is False
     assert json.loads(upstream.messages[-1]) == {
-        "realtime_input": {"audio_stream_end": True}
+        "realtime_input": {"activity_end": {}}
     }
 
 
