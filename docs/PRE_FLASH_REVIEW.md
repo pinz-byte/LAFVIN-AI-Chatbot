@@ -208,3 +208,46 @@ mean-absolute log field rendered incorrectly as `lu`, so only the correctly
 rendered peak values were used. The microphone/I2S path is not completely dead,
 but the selected ES7210 channel is severely attenuated or the TDM slot/gain
 mapping is wrong. The wake failure occurs before the Symbios gateway.
+
+## Manual turn submission correction staged for review
+
+Live testing exposed two independent end-of-turn defects. In the diagnostic
+firmware, a second DOWN press called `ToggleChatState()`, whose listening-state
+branch closes the WebSocket audio channel and returns to standby. It therefore
+never submitted the captured turn. At the gateway, a Xiaozhi `listen.stop`
+message stopped local forwarding but did not send Vertex Live an explicit
+audio-stream-end event, so buffered audio could remain unprocessed when
+automatic voice activity detection did not end the turn itself.
+
+Commit `cf1f86c` makes the diagnostic DOWN callback state-aware: idle starts
+manual listening, listening calls `StopListening()` to submit the turn without
+closing the authenticated session, and speaking retains the existing abort
+behavior. It also corrects the diagnostic mean-level integer formatting. The
+gateway now converts the matching `listen.stop` event into
+`realtime_input.audio_stream_end` for Vertex Live. Provider credentials remain
+server-side; no device credential or API key was added to the firmware.
+
+Gateway tests passed locally (`11 passed, 1 skipped`) and in GitHub Actions.
+Cloud Run revision `symbios-voice-gateway-00007-tg8` is healthy and serves 100%
+of traffic using the unchanged service account, secrets, and public URL.
+
+GitHub Actions run `31329470115` passed all four jobs: gateway tests, stock
+LAFVIN ESP-IDF build, normal Symbios ESP-IDF build, and the endpoint-injected
+diagnostic review build. Builder, local, and archive merged-image checksums
+match. Binary inspection finds the reviewed gateway URL exactly once, no
+`.invalid` URL, the manual-start/manual-submit/abort and corrected input-level
+markers, and no common API-key/token signatures.
+
+- archive:
+  `firmware-review/cf1f86c-manual-submit/releases/v2.2.4_lafvin-aichatbot-symbios-terminal.zip`
+  (SHA-256 `a20858dcd239c52749cbde673c8b1640e303dd1d126226bffb4ef289a33d451c`);
+- merged image:
+  `firmware-review/cf1f86c-manual-submit/build/merged-binary.bin`, 16,384,750
+  bytes (SHA-256
+  `29e7bf6bffd717d068285e589610ed788431537bad6a0162c9aa59d3454a9c50`).
+
+`tools/preflash_audit.py` remains fail-closed for the same documented reasons:
+the diagnostic deliberately changes `audio_service.cc` and the LAFVIN board
+source, and the factory wake/audio smoke acknowledgement is absent. This image
+has not been flashed. Explicit approval of the merged-image SHA-256 above is
+required before any write to the device.
