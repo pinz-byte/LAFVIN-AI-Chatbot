@@ -379,7 +379,15 @@ The gateway had left Vertex automatic activity detection enabled and converted
 the physical stop into `audio_stream_end`. A direct Vertex probe using
 synthesized speech scaled to comparable levels (mean 360, peak 4,197) completed
 successfully when automatic activity detection was disabled and the turn was
-bounded by explicit `activity_start` and `activity_end` events. The staged
+bounded by explicit `activity_start` and `activity_end` events. The deployed
 gateway-only correction applies those deterministic push-to-talk boundaries.
 It does not change or reflash firmware, retain raw audio, expose credentials,
 or alter the reviewed gateway URL.
+
+Commit `d0433c8` passed the project-environment gateway suite (`13 passed, 1
+skipped`) and Python compilation. Cloud Run revision
+`symbios-voice-gateway-00010-6vs` was then deployed and is serving 100% of
+traffic. Both the reviewed device URL and Cloud Run's project-number URL return
+healthy. The service account, nine environment entries, two Secret Manager
+bindings, device firmware, and reviewed public endpoint are unchanged. A new
+physical DOWN/speak/DOWN exchange is required for final live acceptance.
