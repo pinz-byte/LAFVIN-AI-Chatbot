@@ -271,3 +271,63 @@ the Symbios SKU, `ota_0`, retained Wi-Fi, the reviewed HTTPS endpoint,
 formatted numeric input-level diagnostics. A physical DOWN/speak/DOWN exchange
 remains the final live acceptance test; opening a new serial-monitor window
 resets this board, so that test is deferred to uninterrupted user operation.
+
+## Expired voice-session correction staged for review
+
+The uninterrupted physical test showed that DOWN changed the display to
+connecting and then immediately returned it to standby. Cloud Run recorded two
+HTTP 403 WebSocket attempts at `2026-08-09T19:11:44Z` and
+`2026-08-09T19:11:51Z`, before any audio reached Vertex Live. The firmware had
+cached the five-minute WebSocket JWT issued during boot and reused it after the
+device had been idle beyond its expiry. This was independent of the microphone
+gain and manual-submit corrections.
+
+Commit `ea73ca9` changes only the `CONFIG_SYMBIOS_VOICE_GATEWAY` path. Before
+each new audio channel, the device now calls the authenticated HTTPS bootstrap
+with its durable device-scoped NVS credential, requires a valid WSS response,
+and then connects with the newly issued short-lived JWT. Refresh failure is
+fail-closed and leaves the device disconnected. Stock Xiaozhi/LAFVIN transport
+behavior is unchanged. No provider credential or API key is present in the
+firmware; upstream authentication remains on the gateway service account.
+
+Cloud Run revision `symbios-voice-gateway-00009-6b8` includes privacy-safe
+authentication-rejection reasons and aggregate input/output audio metrics. It
+does not log bearer tokens, raw audio, or transcript content. Local gateway
+tests passed (`12 passed, 1 skipped`).
+
+GitHub Actions run `31331108031` built commit
+`ea73ca9ee555ae3fcb437a6aa39f43ccf1d84ad4` and passed all four jobs: gateway
+tests, the stock LAFVIN build, the normal Symbios build, and the
+endpoint-injected diagnostic review build. Builder, downloaded, and archive
+merged-image checksums match. Binary inspection finds the reviewed gateway URL
+exactly once, no `.invalid` endpoint, the manual-start/manual-submit/abort and
+input-level markers, the new credential-refresh marker, and no common
+API-key/token signatures.
+
+- archive:
+  `firmware-review/ea73ca9-session-refresh/releases/v2.2.4_lafvin-aichatbot-symbios-terminal.zip`,
+  8,157,069 bytes (SHA-256
+  `3b76b3a7d0bec8870b9b9ee618a7621d59ab2a80ec5817bd65352d9c531e827e`);
+- merged image:
+  `firmware-review/ea73ca9-session-refresh/build/merged-binary.bin`,
+  16,384,750 bytes (SHA-256
+  `bc0c96f262b2f4ce48e8045f596d9934a2e194b9a391116a55139e9ef484b630`);
+- application image:
+  `firmware-review/ea73ca9-session-refresh/build/xiaozhi.bin`, 2,822,528
+  bytes (SHA-256
+  `884c03924e84f913f58d3b936615269fc07db8e8064efb80b2d8911332ba7e32`).
+
+Esptool validates the ESP32-S3 application checksum and appended digest. The
+image targets DIO, 80 MHz, 16 MB flash, was built with ESP-IDF 5.5.2, and reports
+compile time `Aug 9 2026 19:16:42`. Its partition table, OTA-data region, and
+assets are byte-for-byte identical to the currently approved manual-submit
+image. If separately approved, only the application image at `0x20000` is
+eligible to be written, preserving NVS, Wi-Fi, activation, OTA metadata,
+bootloader, partition table, and assets.
+
+`tools/preflash_audit.py` remains fail-closed for the same documented
+diagnostic exceptions: `audio_service.cc` and the LAFVIN board source differ
+from the vendor baseline, and the factory wake/audio smoke acknowledgement is
+absent. No flash has been performed for this candidate. The board still runs
+the explicitly approved manual-submit image with merged SHA-256
+`29e7bf6bffd717d068285e589610ed788431537bad6a0162c9aa59d3454a9c50`.
