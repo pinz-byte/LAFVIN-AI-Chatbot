@@ -133,8 +133,20 @@ private:
 
 #if CONFIG_LAFVIN_AUDIO_DIAGNOSTIC
         down_button_.OnClick([]() {
-            ESP_LOGI(TAG, "DOWN button: toggling chat state");
-            Application::GetInstance().ToggleChatState();
+            auto& app = Application::GetInstance();
+            const auto state = app.GetDeviceState();
+            if (state == kDeviceStateIdle) {
+                ESP_LOGI(TAG, "DOWN button: starting manual listening");
+                app.StartListening();
+            } else if (state == kDeviceStateListening) {
+                ESP_LOGI(TAG, "DOWN button: submitting manual turn");
+                app.StopListening();
+            } else if (state == kDeviceStateSpeaking) {
+                ESP_LOGI(TAG, "DOWN button: aborting response");
+                app.ToggleChatState();
+            } else {
+                ESP_LOGI(TAG, "DOWN button ignored in state %d", static_cast<int>(state));
+            }
         });
 #endif
 

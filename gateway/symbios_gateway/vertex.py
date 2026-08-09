@@ -74,6 +74,31 @@ async def _send_xiaozhi_json(websocket: WebSocket, session_id: str, **payload: o
     await websocket.send_json({"session_id": session_id, **payload})
 
 
+async def _handle_vertex_listen_event(
+    event: dict[str, object], upstream: object, state: VertexBridgeState, codec: XiaozhiAudioCodec
+) -> None:
+    listen_state = event.get("state")
+    if listen_state == "start":
+        state.discard_output = False
+        state.listening = True
+        codec.clear_output()
+    elif listen_state == "stop":
+        was_listening = state.listening
+        state.listening = False
+        if was_listening:
+            # Vertex automatic VAD requires AudioStreamEnd when the microphone
+            # stream is paused so cached audio is flushed and the turn can finish.
+            await upstream.send(
+                json.dumps(
+                    {"realtime_input": {"audio_stream_end": True}},
+                    separators=(",", ":"),
+                )
+            )
+    elif listen_state == "detect":
+        state.discard_output = False
+        state.user_transcript = ""
+
+
 async def run_vertex_live_bridge(
     websocket: WebSocket,
     settings: GatewaySettings,
@@ -157,16 +182,7 @@ async def run_vertex_live_bridge(
                     continue
                 event_type = event.get("type")
                 if event_type == "listen":
-                    listen_state = event.get("state")
-                    if listen_state == "start":
-                        state.discard_output = False
-                        state.listening = True
-                        codec.clear_output()
-                    elif listen_state == "stop":
-                        state.listening = False
-                    elif listen_state == "detect":
-                        state.discard_output = False
-                        state.user_transcript = ""
+                    await _handle_vertex_listen_event(event, upstream, state, codec)
                 elif event_type == "abort":
                     state.discard_output = True
                     state.tts_active = False

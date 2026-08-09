@@ -243,12 +243,12 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     frames_accumulated += frames;
 
     if (frames_accumulated >= static_cast<uint32_t>(sample_rate)) {
-        const unsigned long long channel_0_mean = reported_channels > 0
-            ? static_cast<unsigned long long>(absolute_sum[0] / frames_accumulated) : 0;
-        const unsigned long long channel_1_mean = reported_channels > 1
-            ? static_cast<unsigned long long>(absolute_sum[1] / frames_accumulated) : 0;
+        const uint32_t channel_0_mean = reported_channels > 0
+            ? static_cast<uint32_t>(absolute_sum[0] / frames_accumulated) : 0;
+        const uint32_t channel_1_mean = reported_channels > 1
+            ? static_cast<uint32_t>(absolute_sum[1] / frames_accumulated) : 0;
         ESP_LOGI(TAG,
-            "Local input levels: channels=%u ch0_mean_abs=%llu ch0_peak=%u ch1_mean_abs=%llu ch1_peak=%u",
+            "Local input levels: channels=%u ch0_mean_abs=%u ch0_peak=%u ch1_mean_abs=%u ch1_peak=%u",
             static_cast<unsigned>(input_channels), channel_0_mean, peak[0], channel_1_mean, peak[1]);
         for (size_t channel = 0; channel < kDiagnosticChannels; ++channel) {
             absolute_sum[channel] = 0;

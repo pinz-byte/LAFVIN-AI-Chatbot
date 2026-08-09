@@ -1,3 +1,5 @@
+import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,7 @@ from symbios_gateway.app import create_app
 from symbios_gateway.config import GatewaySettings
 from symbios_gateway.security import TokenError, verify_session_token
 from symbios_gateway.storage import GatewayStore
+from symbios_gateway.vertex import VertexBridgeState, _handle_vertex_listen_event
 
 
 DEVICE_HEADERS = {
@@ -157,3 +160,41 @@ def test_production_config_requires_tls(tmp_path: Path) -> None:
             voice_provider="proxy",
             database_path=tmp_path / "gateway.sqlite3",
         )
+
+
+def test_vertex_manual_stop_flushes_the_audio_stream() -> None:
+    class Upstream:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        async def send(self, message: str) -> None:
+            self.messages.append(message)
+
+    class Codec:
+        def __init__(self) -> None:
+            self.clear_count = 0
+
+        def clear_output(self) -> None:
+            self.clear_count += 1
+
+    upstream = Upstream()
+    codec = Codec()
+    state = VertexBridgeState()
+
+    asyncio.run(
+        _handle_vertex_listen_event(
+            {"type": "listen", "state": "start"}, upstream, state, codec
+        )
+    )
+    assert state.listening is True
+    assert codec.clear_count == 1
+
+    asyncio.run(
+        _handle_vertex_listen_event(
+            {"type": "listen", "state": "stop"}, upstream, state, codec
+        )
+    )
+    assert state.listening is False
+    assert json.loads(upstream.messages[-1]) == {
+        "realtime_input": {"audio_stream_end": True}
+    }
