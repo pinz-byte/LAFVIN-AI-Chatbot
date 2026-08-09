@@ -2,6 +2,7 @@
 #include "board.h"
 #include "system_info.h"
 #include "application.h"
+#include "ota.h"
 #include "settings.h"
 
 #include <cstring>
@@ -81,6 +82,24 @@ void WebsocketProtocol::CloseAudioChannel(bool send_goodbye) {
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
+#ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
+    // The bootstrap WebSocket JWT is deliberately short-lived. Refresh it
+    // through the authenticated OTA endpoint whenever a new audio channel is
+    // opened so an idle device never reuses an expired bearer token.
+    Ota ota;
+    esp_err_t refresh_result = ota.CheckVersion();
+    if (refresh_result != ESP_OK || !ota.HasWebsocketConfig()) {
+        ESP_LOGE(
+            TAG,
+            "Failed to refresh Symbios WebSocket credentials, code=%s",
+            esp_err_to_name(refresh_result)
+        );
+        SetError(Lang::Strings::SERVER_NOT_CONNECTED);
+        return false;
+    }
+    ESP_LOGI(TAG, "Refreshed Symbios WebSocket credentials");
+#endif
+
     Settings settings("websocket", false);
     std::string url = settings.GetString("url");
     std::string token = settings.GetString("token");

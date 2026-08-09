@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
 import re
 import time
 from contextlib import asynccontextmanager
@@ -16,6 +17,9 @@ from .realtime import RealtimeBridgeError, run_openai_realtime_bridge
 from .security import TokenError, issue_session_token, verify_session_token
 from .storage import FirestoreGatewayStore, GatewayStore, Store
 from .vertex import VertexLiveBridgeError, run_vertex_live_bridge
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9:._-]{3,128}$")
@@ -170,7 +174,8 @@ def create_app(settings: GatewaySettings | None = None, store: Store | None = No
             return
         try:
             claims = verify_session_token(settings.jwt_secret, token)
-        except TokenError:
+        except TokenError as exc:
+            logger.info("Rejected voice session bearer: %s", exc)
             await websocket.close(code=4401, reason="invalid bearer token")
             return
 
