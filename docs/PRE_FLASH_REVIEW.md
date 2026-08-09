@@ -3,8 +3,8 @@
 The first reviewed image and its endpoint-injected correction were **explicitly
 approved and flashed on 2026-08-09**. Activation now succeeds and survives a
 reboot. Local microphone/wake behavior remains unresolved. A narrowly scoped
-diagnostic image has passed CI and is **awaiting review; it has not been
-flashed**.
+diagnostic image passed CI, received explicit hash approval, and was flashed to
+the active application slot without erasing device state.
 
 ## What changed
 
@@ -142,7 +142,7 @@ The tracked `.invalid` endpoint remains a deliberate safety catch. Production
 builds generate an ignored local config from an explicitly supplied HTTPS URL;
 this prevents a normal source checkout from accidentally contacting a service.
 
-## Local microphone diagnostic awaiting review
+## Local microphone diagnostic flash and result
 
 The idle face, display, speaker, Wi-Fi, authenticated activation, and token
 persistence are healthy. UART confirms the local AFE starts with one microphone
@@ -178,5 +178,33 @@ markers, no `.invalid` URL, and no common OpenAI/Google API-key signatures.
 protected-path changes (`audio_service.cc` and the LAFVIN board source) and the
 still-missing factory wake/audio smoke acknowledgement. Therefore the
 diagnostic image requires explicit hash approval as a documented exception.
-It has **not** been flashed; the current production image remains recoverable
-and unchanged.
+
+The user explicitly approved merged-image SHA-256
+`961732b84bb67764a3bc9aa7b5c9287953718aba21f9f20519b042e9315e9a60`.
+Before writing, the live and reviewed partition tables were compared and found
+byte-for-byte identical. OTA metadata reported sequence 1/state VALID, making
+`ota_0` at `0x20000` the active slot. The current NVS/OTA/PHY region was saved
+to a private ignored backup with mode `0600` and SHA-256
+`1e8a4c3ba63becb40509772b6f56b764b27bb8b637cc29aa9ce207824da76a75`.
+
+Only the 2,821,808-byte `xiaozhi.bin` extracted from the approved merged image
+was written at `0x20000`; its SHA-256 is
+`10c5af65bac100d34ffdde758959c45a94ebafb3dc7b67e20eaf63c60855d5af`.
+No full erase, NVS write, partition-table write, bootloader write, or asset write
+was performed. Esptool verified the data hash and hard-reset normally. UART
+then confirmed the diagnostic compile timestamp, `ota_0`, preserved Wi-Fi,
+`Activation done`, idle state, and the expected Symbios endpoint.
+
+The physical DOWN button produced the diagnostic marker, opened authenticated
+WSS sessions, and changed the state from idle through connecting to listening.
+Further presses stopped and restarted listening. This validates the GPIO19
+mapping, device token, gateway discovery, WebSocket authentication, and manual
+listening path.
+
+The input result is local and abnormal: channel 0 has idle peaks generally in
+the 20–80 range and reacts to nearby speech only into roughly the 300–600 range;
+channel 1 remains zero while playback is idle. No WakeNet event occurred. The
+mean-absolute log field rendered incorrectly as `lu`, so only the correctly
+rendered peak values were used. The microphone/I2S path is not completely dead,
+but the selected ES7210 channel is severely attenuated or the TDM slot/gain
+mapping is wrong. The wake failure occurs before the Symbios gateway.
