@@ -94,8 +94,7 @@ gateway still rejects a missing or mismatched challenge.
 
 GitHub Actions run `31325001210` passed the gateway tests and full ESP-IDF 5.5.2
 builds for both `lafvin-aichatbot` and
-`lafvin-aichatbot-symbios-terminal`. The CI-produced replacement is staged for
-review at:
+`lafvin-aichatbot-symbios-terminal`. Its generic CI artifact was:
 
 - archive: `firmware-review/73f7d03/v2.2.4_lafvin-aichatbot-symbios-terminal.zip`
   (SHA-256 `f73ff91407dfbecb2bda4287b133e9247747c3ce928d09580aa5a68adadbf504`);
@@ -103,11 +102,32 @@ review at:
   bytes (SHA-256
   `60b1da1b70dd41721224cf5cdb41a3bf982a22e53b291c5ccb13293e7447c950`).
 
-The board still contains the previously flashed image with SHA-256
-`a6087b9add751a13c52e88ecc9ef8d49c3bf51a1da8d894c0e7d8e7f030479d5`.
-Do not flash the corrected image until its hash and this delta are explicitly
-approved. The expired activation code is not a credential and will be replaced
-after the corrected firmware boots.
+The user explicitly approved that hash, and it was written and verified. On
+the next boot, UART showed that the generic CI artifact contained the tracked
+`https://symbios-gateway.invalid/xiaozhi/ota/` safety endpoint. Wi-Fi and the
+board were healthy, but DNS correctly rejected that non-existent host. The
+displayed `32769` was the ESP network error code, not an activation code. Using
+the generic artifact instead of the endpoint-injected build was a build-selection
+error; no unintended cloud endpoint was contacted.
+
+Cloud Build `adfa9f6b-35e9-4a59-bc32-a6432667dc60` then rebuilt the same source
+with the reviewed production bootstrap URL injected. The builder-generated and
+locally calculated checksums match, and binary inspection finds the Symbios SKU
+and `https://symbios-voice-gateway-hiz3vgfrfa-uc.a.run.app/xiaozhi/ota/` while
+finding no `.invalid` endpoint. The production replacement staged for review is:
+
+- archive:
+  `firmware-review/adfa9f6b-35e9-4a59-bc32-a6432667dc60/v2.2.4_lafvin-aichatbot-symbios-terminal.zip`
+  (SHA-256 `b90f8fc9a711173954ccc66d2ae47ce99772a243d68d1214c6f0d21ece781915`);
+- merged image:
+  `firmware-review/adfa9f6b-35e9-4a59-bc32-a6432667dc60/merged-binary.bin`,
+  16,384,750 bytes (SHA-256
+  `9acfdb147838e8d48c5d79874455720582ade950fe6356d8f70326d1a9b97466`).
+
+The board currently contains the generic safety image with SHA-256
+`60b1da1b70dd41721224cf5cdb41a3bf982a22e53b291c5ccb13293e7447c950`.
+The endpoint-injected production image has not been flashed and requires a new
+explicit hash approval.
 
 During activation handling, the gateway admin credential was rotated after a
 local client diagnostic exposed its old value. Cloud Run revision
