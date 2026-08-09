@@ -463,6 +463,19 @@ bool Ota::IsNewVersionAvailable(const std::string& currentVersion, const std::st
 }
 
 std::string Ota::GetActivationPayload() {
+#ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
+    // Symbios enrollment authenticates the device with the random challenge
+    // returned by the gateway. Factory serial numbers and eFuse HMAC keys are
+    // optional on supported boards, so never discard the challenge when they
+    // are absent.
+    cJSON *payload = cJSON_CreateObject();
+    cJSON_AddStringToObject(payload, "challenge", activation_challenge_.c_str());
+    auto json_str = cJSON_PrintUnformatted(payload);
+    std::string json(json_str);
+    cJSON_free(json_str);
+    cJSON_Delete(payload);
+    return json;
+#else
     if (!has_serial_number_) {
         return "{}";
     }
@@ -497,6 +510,7 @@ std::string Ota::GetActivationPayload() {
 
     ESP_LOGI(TAG, "Activation payload: %s", json.c_str());
     return json;
+#endif
 }
 
 esp_err_t Ota::Activate() {
