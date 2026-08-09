@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
+import struct
 import uuid
 from dataclasses import dataclass
 
@@ -13,6 +15,9 @@ from websockets.asyncio.client import connect as connect_websocket
 
 from .audio import XiaozhiAudioCodec, unwrap_opus_frame, wrap_opus_frame
 from .config import GatewaySettings
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class VertexLiveBridgeError(RuntimeError):
@@ -26,6 +31,39 @@ class VertexBridgeState:
     discard_output: bool = False
     user_transcript: str = ""
     assistant_transcript: str = ""
+    input_frames: int = 0
+    input_pcm_bytes: int = 0
+    input_abs_sum: int = 0
+    input_samples: int = 0
+    input_peak: int = 0
+    output_pcm_bytes: int = 0
+
+
+def _reset_vertex_audio_metrics(state: VertexBridgeState) -> None:
+    state.input_frames = 0
+    state.input_pcm_bytes = 0
+    state.input_abs_sum = 0
+    state.input_samples = 0
+    state.input_peak = 0
+    state.output_pcm_bytes = 0
+
+
+def _record_vertex_input_pcm(state: VertexBridgeState, pcm16: bytes) -> None:
+    if len(pcm16) % 2:
+        raise VertexLiveBridgeError("decoded device PCM has an odd byte count")
+    state.input_frames += 1
+    state.input_pcm_bytes += len(pcm16)
+    for (sample,) in struct.iter_unpack("<h", pcm16):
+        magnitude = abs(sample)
+        state.input_abs_sum += magnitude
+        state.input_peak = max(state.input_peak, magnitude)
+        state.input_samples += 1
+
+
+def _vertex_input_mean_abs(state: VertexBridgeState) -> int:
+    if not state.input_samples:
+        return 0
+    return state.input_abs_sum // state.input_samples
 
 
 def _vertex_uri(settings: GatewaySettings) -> str:
@@ -81,10 +119,19 @@ async def _handle_vertex_listen_event(
     if listen_state == "start":
         state.discard_output = False
         state.listening = True
+        _reset_vertex_audio_metrics(state)
         codec.clear_output()
+        logger.info("Vertex listen started")
     elif listen_state == "stop":
         was_listening = state.listening
         state.listening = False
+        logger.info(
+            "Vertex listen stopped: frames=%d pcm_bytes=%d mean_abs=%d peak=%d",
+            state.input_frames,
+            state.input_pcm_bytes,
+            _vertex_input_mean_abs(state),
+            state.input_peak,
+        )
         if was_listening:
             # Vertex automatic VAD requires AudioStreamEnd when the microphone
             # stream is paused so cached audio is flushed and the turn can finish.
@@ -156,6 +203,7 @@ async def run_vertex_live_bridge(
                         pcm16 = codec.decode_input_16k(opus_payload)
                     except (ValueError, RuntimeError) as exc:
                         raise VertexLiveBridgeError("invalid device audio frame") from exc
+                    _record_vertex_input_pcm(state, pcm16)
                     await upstream.send(
                         json.dumps(
                             {
@@ -219,6 +267,10 @@ async def run_vertex_live_bridge(
                     continue
                 if "error" in event:
                     error = event.get("error") or {}
+                    logger.error(
+                        "Vertex Live returned error code %s",
+                        error.get("code", "unknown"),
+                    )
                     raise VertexLiveBridgeError(
                         f"Vertex Live error: {error.get('code', 'unknown')}"
                     )
@@ -245,6 +297,10 @@ async def run_vertex_live_bridge(
                     if isinstance(text, str):
                         state.user_transcript += text
                     if input_transcription.get("finished") and state.user_transcript.strip():
+                        logger.info(
+                            "Vertex input transcription finished: chars=%d",
+                            len(state.user_transcript.strip()),
+                        )
                         await _send_xiaozhi_json(
                             websocket,
                             session_id,
@@ -286,6 +342,7 @@ async def run_vertex_live_bridge(
                             pcm16 = base64.b64decode(data, validate=True)
                         except ValueError as exc:
                             raise VertexLiveBridgeError("invalid Vertex audio payload") from exc
+                        state.output_pcm_bytes += len(pcm16)
                         for opus_payload in codec.feed_output(pcm16):
                             await websocket.send_bytes(
                                 wrap_opus_frame(opus_payload, protocol_version)
@@ -305,6 +362,21 @@ async def run_vertex_live_bridge(
                         )
                         state.user_transcript = ""
                     await finish_turn()
+                    if turn_complete:
+                        logger.info(
+                            "Vertex turn completed: output_pcm_bytes=%d",
+                            state.output_pcm_bytes,
+                        )
+
+            logger.info(
+                "Vertex stream closed: frames=%d pcm_bytes=%d mean_abs=%d "
+                "peak=%d output_pcm_bytes=%d",
+                state.input_frames,
+                state.input_pcm_bytes,
+                _vertex_input_mean_abs(state),
+                state.input_peak,
+                state.output_pcm_bytes,
+            )
 
         tasks = {
             asyncio.create_task(device_to_vertex()),

@@ -10,7 +10,12 @@ from symbios_gateway.app import create_app
 from symbios_gateway.config import GatewaySettings
 from symbios_gateway.security import TokenError, verify_session_token
 from symbios_gateway.storage import GatewayStore
-from symbios_gateway.vertex import VertexBridgeState, _handle_vertex_listen_event
+from symbios_gateway.vertex import (
+    VertexBridgeState,
+    _handle_vertex_listen_event,
+    _record_vertex_input_pcm,
+    _vertex_input_mean_abs,
+)
 
 
 DEVICE_HEADERS = {
@@ -198,3 +203,15 @@ def test_vertex_manual_stop_flushes_the_audio_stream() -> None:
     assert json.loads(upstream.messages[-1]) == {
         "realtime_input": {"audio_stream_end": True}
     }
+
+
+def test_vertex_audio_metrics_record_pcm_without_retaining_audio() -> None:
+    state = VertexBridgeState()
+
+    _record_vertex_input_pcm(state, b"\x00\x00\x64\x00\x9c\xff\xff\x7f")
+
+    assert state.input_frames == 1
+    assert state.input_pcm_bytes == 8
+    assert state.input_samples == 4
+    assert state.input_peak == 32767
+    assert _vertex_input_mean_abs(state) == 8241
