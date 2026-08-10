@@ -594,6 +594,16 @@ rejects malformed or non-object payloads. A regression test covers both frame
 types and invalid input. The isolated Python 3.13 suite passes (`18 passed, 1
 skipped`), Python compilation succeeds, and `git diff --check` is clean. This
 is a gateway-only change: it does not alter device firmware, authentication,
-Secret Manager bindings, raw-audio handling, or the public endpoint. It has
-not been deployed; production remains on revision
-`symbios-voice-gateway-00014-sug` pending review.
+Secret Manager bindings, raw-audio handling, or the public endpoint.
+
+The user explicitly approved deployment of commit
+`e60b8a02483c946e9323bebacc89d171a10cb724` after its Gateway CI job passed.
+Cloud Run revision `symbios-voice-gateway-00019-led` was built from that exact
+checkout and first deployed at zero percent traffic behind a temporary tag.
+The tagged health route returned HTTP 200, and the revision matched the
+reviewed service account, both Secret Manager references, Firestore backend,
+Vertex model, 4x input gain, and `vertex_live` provider. The verified revision
+was then promoted to 100 percent traffic. Both the candidate and RAM-loopback
+tags were removed; the public health route returns HTTP 200 and there are no
+revision error logs. No firmware was changed or flashed. One physical
+DOWN/speak/DOWN turn remains the final end-to-end acceptance test.
