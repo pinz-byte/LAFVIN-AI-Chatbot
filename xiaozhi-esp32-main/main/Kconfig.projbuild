@@ -57,6 +57,36 @@ config LAFVIN_SLOT_AUDITION
         AFE, AEC, resampling, Opus, and cloud transport. It is never persisted
         or transmitted. Leave this disabled in production firmware.
 
+config SYMBIOS_AUTO_SUBMIT_ON_SILENCE
+    bool "Automatically submit a Symbios voice turn after speech ends"
+    depends on SYMBIOS_VOICE_GATEWAY && BOARD_TYPE_LAFVIN_AICHATBOT && USE_AUDIO_PROCESSOR
+    default n
+    help
+        Use the existing on-device AFE voice-activity detector to submit an
+        automatic listening turn after speech followed by bounded silence.
+        Manual listening and the physical DOWN-button submit fallback remain
+        available. This is default-off so stock and non-Symbios builds retain
+        upstream behavior.
+
+config SYMBIOS_AUTO_SUBMIT_SILENCE_MS
+    int "Silence before automatic Symbios turn submission (ms)"
+    depends on SYMBIOS_AUTO_SUBMIT_ON_SILENCE
+    range 600 3000
+    default 1200
+    help
+        Required continuous silence after at least one detected speech segment.
+        Longer values tolerate pauses but add end-of-turn latency.
+
+config SYMBIOS_AUTO_SUBMIT_MIN_SPEECH_MS
+    int "Minimum speech segment for automatic Symbios submission (ms)"
+    depends on SYMBIOS_AUTO_SUBMIT_ON_SILENCE
+    range 120 1000
+    default 300
+    help
+        Ignore shorter VAD bursts before arming auto-submit. This prevents the
+        local wake acknowledgement or a transient noise from becoming an empty
+        voice turn.
+
 choice
     prompt "Flash Assets"
     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE

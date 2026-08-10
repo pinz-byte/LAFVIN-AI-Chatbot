@@ -31,6 +31,7 @@
 #define MAIN_EVENT_START_LISTENING      (1 << 10)
 #define MAIN_EVENT_STOP_LISTENING       (1 << 11)
 #define MAIN_EVENT_STATE_CHANGED        (1 << 12)
+#define MAIN_EVENT_AUTO_STOP_LISTENING  (1 << 13)
 
 
 enum AecMode {
@@ -129,6 +130,11 @@ private:
     std::unique_ptr<Protocol> protocol_;
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
+#if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
+    esp_timer_handle_t auto_submit_timer_handle_ = nullptr;
+    bool auto_submit_heard_speech_ = false;
+    int64_t auto_submit_speech_started_us_ = 0;
+#endif
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
     AecMode aec_mode_ = kAecOff;
@@ -153,6 +159,11 @@ private:
     void HandleNetworkDisconnectedEvent();
     void HandleActivationDoneEvent();
     void HandleWakeWordDetectedEvent();
+#if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
+    void HandleVadChangeForAutoSubmit(bool speaking);
+    void HandleAutoStopListeningEvent();
+    void ResetAutoSubmitState();
+#endif
     void ContinueOpenAudioChannel(ListeningMode mode);
     void ContinueWakeWordInvoke(const std::string& wake_word);
 

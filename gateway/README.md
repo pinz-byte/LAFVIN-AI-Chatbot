@@ -21,6 +21,28 @@ back to the device's 60 ms Opus frames. The ESP32 receives no provider key.
 5. The gateway verifies the JWT, opens a service-account-authenticated Vertex Live
    session, and bridges Xiaozhi hello/listen/STT/TTS/audio events.
 
+## Authenticated Symbios context
+
+The optional project-awareness bridge exposes exactly two read-only Vertex
+functions: an operational brief and a focused Memory Bridge search. Configure
+both variables together:
+
+```sh
+SYMBIOS_CONTEXT_BASE_URL=https://symbios-query-server.example.com
+SYMBIOS_CONTEXT_TOKEN=<Secret Manager reference at deploy time>
+```
+
+`SYMBIOS_CONTEXT_TOKEN` is a gateway-only bearer. It must be injected from a
+server-side secret store and must never be placed in an ESP32 build setting,
+bootstrap response, log, or device NVS. The gateway deliberately does not
+expose the query server's session-ingest endpoint or any other write action.
+When the variables are absent, no context tools are declared to Vertex.
+
+The configured service must implement the canonical Symbios Memory Bridge
+`POST /brief` and `POST /query` contracts. This integration extends that
+retrieval boundary; it does not read repositories, Notion, Pinecone, APEX, or
+broker accounts through parallel paths.
+
 TLS is mandatory in production. The gateway intentionally has no permissive
 or anonymous voice mode.
 

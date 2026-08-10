@@ -15,6 +15,7 @@ from websockets.asyncio.client import connect as connect_websocket
 
 from .audio import XiaozhiAudioCodec, amplify_pcm16, unwrap_opus_frame, wrap_opus_frame
 from .config import GatewaySettings
+from .context import SymbiosContextClient, SymbiosContextError
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -77,24 +78,50 @@ def _vertex_setup(settings: GatewaySettings) -> str:
         f"projects/{settings.gcp_project}/locations/{settings.vertex_location}"
         f"/publishers/google/models/{settings.vertex_live_model}"
     )
-    return json.dumps(
-        {
-            "setup": {
-                "model": model,
-                "generation_config": {"response_modalities": ["audio"]},
-                "system_instruction": {
-                    "parts": [{"text": settings.voice_instructions}]
-                },
-                "input_audio_transcription": {},
-                "output_audio_transcription": {},
-                "realtime_input_config": {
-                    "automatic_activity_detection": {"disabled": True}
-                },
-                "context_window_compression": {"sliding_window": {}},
-            }
+    setup: dict[str, object] = {
+        "model": model,
+        "generation_config": {"response_modalities": ["audio"]},
+        "system_instruction": {"parts": [{"text": settings.voice_instructions}]},
+        "input_audio_transcription": {},
+        "output_audio_transcription": {},
+        "realtime_input_config": {
+            "automatic_activity_detection": {"disabled": True}
         },
-        separators=(",", ":"),
-    )
+        "context_window_compression": {"sliding_window": {}},
+    }
+    if settings.context_enabled:
+        setup["tools"] = [
+            {
+                "function_declarations": [
+                    {
+                        "name": "get_operational_brief",
+                        "description": (
+                            "Read the authenticated Symbios operational brief for current "
+                            "priorities, agenda, inboxes, project state, and portfolio context."
+                        ),
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                    {
+                        "name": "search_symbios_context",
+                        "description": (
+                            "Search the canonical Symbios Memory Bridge for project history, "
+                            "prior decisions, people, and other private operating context."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "A focused semantic search query.",
+                                }
+                            },
+                            "required": ["query"],
+                        },
+                    },
+                ]
+            }
+        ]
+    return json.dumps({"setup": setup}, separators=(",", ":"))
 
 
 def _access_token() -> str:
@@ -174,6 +201,58 @@ async def _handle_vertex_listen_event(
         state.user_transcript = ""
 
 
+async def _handle_vertex_tool_call(
+    tool_call: dict[str, object],
+    upstream: object,
+    context_client: SymbiosContextClient | None,
+) -> None:
+    function_calls = _field(tool_call, "functionCalls", "function_calls")
+    if not isinstance(function_calls, list):
+        return
+
+    function_responses: list[dict[str, object]] = []
+    for function_call in function_calls:
+        if not isinstance(function_call, dict):
+            continue
+        call_id = function_call.get("id")
+        name = function_call.get("name")
+        arguments = function_call.get("args", {})
+        if not isinstance(call_id, str) or not isinstance(name, str):
+            continue
+        if not isinstance(arguments, dict):
+            arguments = {}
+
+        if context_client is None:
+            result: dict[str, object] = {
+                "error": "Symbios project context is not configured for this gateway."
+            }
+        else:
+            try:
+                result = await context_client.execute(name, arguments)
+            except SymbiosContextError as exc:
+                logger.warning("Symbios context tool %s failed: %s", name, exc)
+                result = {
+                    "error": "Symbios project context is temporarily unavailable."
+                }
+
+        function_responses.append(
+            {"id": call_id, "name": name, "response": result}
+        )
+        logger.info("Completed read-only Symbios context tool: %s", name)
+
+    if function_responses:
+        await upstream.send(
+            json.dumps(
+                {
+                    "tool_response": {
+                        "function_responses": function_responses,
+                    }
+                },
+                separators=(",", ":"),
+            )
+        )
+
+
 async def run_vertex_live_bridge(
     websocket: WebSocket,
     settings: GatewaySettings,
@@ -184,6 +263,9 @@ async def run_vertex_live_bridge(
     session_id = uuid.uuid4().hex
     codec = XiaozhiAudioCodec()
     state = VertexBridgeState()
+    context_client = (
+        SymbiosContextClient.from_settings(settings) if settings.context_enabled else None
+    )
 
     async with connect_websocket(
         _vertex_uri(settings),
@@ -303,6 +385,13 @@ async def run_vertex_live_bridge(
                     raise VertexLiveBridgeError(
                         f"Vertex Live error: {error.get('code', 'unknown')}"
                     )
+
+                tool_call = _field(event, "toolCall", "tool_call")
+                if isinstance(tool_call, dict):
+                    await _handle_vertex_tool_call(
+                        tool_call, upstream, context_client
+                    )
+                    continue
 
                 content = _field(event, "serverContent", "server_content")
                 if not isinstance(content, dict):

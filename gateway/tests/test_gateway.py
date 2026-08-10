@@ -17,6 +17,7 @@ from symbios_gateway.vertex import (
     VertexBridgeState,
     _decode_vertex_server_event,
     _handle_vertex_listen_event,
+    _handle_vertex_tool_call,
     _record_vertex_input_pcm,
     _vertex_input_mean_abs,
     _vertex_setup,
@@ -184,6 +185,22 @@ def test_ram_loopback_config_needs_no_provider_credential(tmp_path: Path) -> Non
     assert settings.voice_provider == "ram_loopback"
 
 
+def test_context_configuration_is_all_or_nothing_and_secret_is_redacted(
+    settings: GatewaySettings,
+) -> None:
+    with pytest.raises(ValueError, match="configured together"):
+        replace(settings, context_base_url="https://context.test")
+
+    configured = replace(
+        settings,
+        context_base_url="https://context.test",
+        context_token="server-only-context-token",
+    )
+
+    assert configured.context_enabled is True
+    assert "server-only-context-token" not in repr(configured)
+
+
 def test_ram_loopback_replays_and_clears_volatile_pcm(
     settings: GatewaySettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -275,6 +292,30 @@ def test_vertex_setup_uses_explicit_activity_boundaries(settings: GatewaySetting
     assert setup["realtime_input_config"] == {
         "automatic_activity_detection": {"disabled": True}
     }
+    assert "tools" not in setup
+
+
+def test_vertex_setup_declares_read_only_context_tools_when_configured(
+    settings: GatewaySettings,
+) -> None:
+    configured = replace(
+        settings,
+        gcp_project="test-project",
+        context_base_url="https://context.test",
+        context_token="context-token",
+    )
+
+    setup = json.loads(_vertex_setup(configured))["setup"]
+    declarations = setup["tools"][0]["function_declarations"]
+
+    assert [item["name"] for item in declarations] == [
+        "get_operational_brief",
+        "search_symbios_context",
+    ]
+    assert all(
+        not item["name"].startswith(("write", "close", "send"))
+        for item in declarations
+    )
 
 
 def test_vertex_server_event_decoder_accepts_binary_websocket_json() -> None:
@@ -325,6 +366,55 @@ def test_vertex_manual_turn_sends_explicit_activity_boundaries() -> None:
     assert state.listening is False
     assert json.loads(upstream.messages[-1]) == {
         "realtime_input": {"activity_end": {}}
+    }
+
+
+def test_vertex_context_tool_call_preserves_call_id_and_returns_result() -> None:
+    class Upstream:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        async def send(self, message: str) -> None:
+            self.messages.append(message)
+
+    class ContextClient:
+        async def execute(
+            self, name: str, arguments: dict[str, object]
+        ) -> dict[str, object]:
+            assert name == "search_symbios_context"
+            assert arguments == {"query": "terminal status"}
+            return {"output": "review candidate prepared", "truncated": False}
+
+    upstream = Upstream()
+    asyncio.run(
+        _handle_vertex_tool_call(
+            {
+                "functionCalls": [
+                    {
+                        "id": "call-123",
+                        "name": "search_symbios_context",
+                        "args": {"query": "terminal status"},
+                    }
+                ]
+            },
+            upstream,
+            ContextClient(),  # type: ignore[arg-type]
+        )
+    )
+
+    assert json.loads(upstream.messages[0]) == {
+        "tool_response": {
+            "function_responses": [
+                {
+                    "id": "call-123",
+                    "name": "search_symbios_context",
+                    "response": {
+                        "output": "review candidate prepared",
+                        "truncated": False,
+                    },
+                }
+            ]
+        }
     }
 
 

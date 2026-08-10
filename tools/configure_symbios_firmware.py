@@ -34,7 +34,7 @@ def main() -> int:
     diagnostic_mode.add_argument(
         "--lafvin-audio-diagnostic",
         action="store_true",
-        help="enable local input-level logs and the GPIO19 DOWN-button trigger",
+        help="enable local input-level logs; Symbios builds retain the GPIO19 fallback",
     )
     diagnostic_mode.add_argument(
         "--lafvin-slot-audition",
@@ -49,6 +49,7 @@ def main() -> int:
         "CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=n",
         "CONFIG_SR_WN_WN9_HIESP=y",
         "CONFIG_SYMBIOS_VOICE_GATEWAY=y",
+        "CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE=y",
         f'CONFIG_SYMBIOS_GATEWAY_URL="{args.gateway_url}"',
     ]
     if args.lafvin_audio_diagnostic:

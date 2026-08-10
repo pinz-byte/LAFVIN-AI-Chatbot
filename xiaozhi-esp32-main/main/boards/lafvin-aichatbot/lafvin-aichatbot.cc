@@ -79,7 +79,7 @@ private:
     i2c_master_bus_handle_t i2c_bus_;
     // i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
-#if CONFIG_LAFVIN_AUDIO_DIAGNOSTIC || CONFIG_LAFVIN_SLOT_AUDITION
+#if CONFIG_SYMBIOS_VOICE_GATEWAY || CONFIG_LAFVIN_AUDIO_DIAGNOSTIC || CONFIG_LAFVIN_SLOT_AUDITION
     Button down_button_;
 #endif
     Display* display_;
@@ -228,7 +228,7 @@ private:
         down_button_.OnClick([this]() {
             StartAudition();
         });
-#elif CONFIG_LAFVIN_AUDIO_DIAGNOSTIC
+#elif CONFIG_SYMBIOS_VOICE_GATEWAY || CONFIG_LAFVIN_AUDIO_DIAGNOSTIC
         down_button_.OnClick([]() {
             auto& app = Application::GetInstance();
             const auto state = app.GetDeviceState();
@@ -384,7 +384,7 @@ private:
 
 public:
     LichuangDevBoard() : boot_button_(BOOT_BUTTON_GPIO)
-#if CONFIG_LAFVIN_AUDIO_DIAGNOSTIC || CONFIG_LAFVIN_SLOT_AUDITION
+#if CONFIG_SYMBIOS_VOICE_GATEWAY || CONFIG_LAFVIN_AUDIO_DIAGNOSTIC || CONFIG_LAFVIN_SLOT_AUDITION
         , down_button_(GPIO_NUM_19)
 #endif
     {

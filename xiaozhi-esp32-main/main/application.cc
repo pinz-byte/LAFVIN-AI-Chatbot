@@ -44,9 +44,29 @@ Application::Application() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
+
+#if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
+    esp_timer_create_args_t auto_submit_timer_args = {
+        .callback = [](void* arg) {
+            Application* app = (Application*)arg;
+            xEventGroupSetBits(app->event_group_, MAIN_EVENT_AUTO_STOP_LISTENING);
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "symbios_auto_submit",
+        .skip_unhandled_events = true
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&auto_submit_timer_args, &auto_submit_timer_handle_));
+#endif
 }
 
 Application::~Application() {
+#if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
+    if (auto_submit_timer_handle_ != nullptr) {
+        esp_timer_stop(auto_submit_timer_handle_);
+        esp_timer_delete(auto_submit_timer_handle_);
+    }
+#endif
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
@@ -179,7 +199,8 @@ void Application::Run() {
         MAIN_EVENT_START_LISTENING |
         MAIN_EVENT_STOP_LISTENING |
         MAIN_EVENT_ACTIVATION_DONE |
-        MAIN_EVENT_STATE_CHANGED;
+        MAIN_EVENT_STATE_CHANGED |
+        MAIN_EVENT_AUTO_STOP_LISTENING;
 
     while (true) {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
@@ -233,8 +254,17 @@ void Application::Run() {
             if (GetDeviceState() == kDeviceStateListening) {
                 auto led = Board::GetInstance().GetLed();
                 led->OnStateChanged();
+#if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
+                HandleVadChangeForAutoSubmit(audio_service_.IsVoiceDetected());
+#endif
             }
         }
+
+#if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
+        if (bits & MAIN_EVENT_AUTO_STOP_LISTENING) {
+            HandleAutoStopListeningEvent();
+        }
+#endif
 
         if (bits & MAIN_EVENT_SCHEDULE) {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -782,6 +812,72 @@ void Application::HandleStopListeningEvent() {
     }
 }
 
+#if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
+void Application::ResetAutoSubmitState() {
+    auto_submit_heard_speech_ = false;
+    auto_submit_speech_started_us_ = 0;
+    if (auto_submit_timer_handle_ != nullptr) {
+        esp_timer_stop(auto_submit_timer_handle_);
+    }
+}
+
+void Application::HandleVadChangeForAutoSubmit(bool speaking) {
+    if (listening_mode_ != kListeningModeAutoStop ||
+        GetDeviceState() != kDeviceStateListening) {
+        return;
+    }
+
+    if (speaking) {
+        auto_submit_speech_started_us_ = esp_timer_get_time();
+        esp_timer_stop(auto_submit_timer_handle_);
+        return;
+    }
+
+    if (auto_submit_speech_started_us_ == 0) {
+        return;
+    }
+
+    const int64_t speech_duration_us =
+        esp_timer_get_time() - auto_submit_speech_started_us_;
+    auto_submit_speech_started_us_ = 0;
+    const int64_t minimum_speech_us =
+        static_cast<int64_t>(CONFIG_SYMBIOS_AUTO_SUBMIT_MIN_SPEECH_MS) * 1000LL;
+    if (speech_duration_us >= minimum_speech_us) {
+        auto_submit_heard_speech_ = true;
+    }
+    if (!auto_submit_heard_speech_) {
+        ESP_LOGI(TAG, "Ignoring %lld ms VAD burst before Symbios auto-submit",
+            static_cast<long long>(speech_duration_us / 1000LL));
+        return;
+    }
+
+    esp_timer_stop(auto_submit_timer_handle_);
+    const uint64_t silence_us =
+        static_cast<uint64_t>(CONFIG_SYMBIOS_AUTO_SUBMIT_SILENCE_MS) * 1000ULL;
+    esp_err_t error = esp_timer_start_once(auto_submit_timer_handle_, silence_us);
+    if (error != ESP_OK) {
+        ESP_LOGW(TAG, "Unable to arm Symbios auto-submit timer: %s",
+            esp_err_to_name(error));
+    }
+}
+
+void Application::HandleAutoStopListeningEvent() {
+    if (GetDeviceState() != kDeviceStateListening ||
+        listening_mode_ != kListeningModeAutoStop ||
+        !auto_submit_heard_speech_ || audio_service_.IsVoiceDetected()) {
+        return;
+    }
+
+    auto_submit_heard_speech_ = false;
+    ESP_LOGI(TAG, "Symbios auto-submit after %d ms of silence",
+        CONFIG_SYMBIOS_AUTO_SUBMIT_SILENCE_MS);
+    if (protocol_) {
+        protocol_->SendStopListening();
+    }
+    SetDeviceState(kDeviceStateIdle);
+}
+#endif
+
 void Application::HandleWakeWordDetectedEvent() {
     if (!protocol_) {
         return;
@@ -865,6 +961,10 @@ void Application::HandleStateChangedEvent() {
     DeviceState new_state = state_machine_.GetState();
     clock_ticks_ = 0;
 
+#if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
+    ResetAutoSubmitState();
+#endif
+
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
     auto led = board.GetLed();
@@ -873,7 +973,11 @@ void Application::HandleStateChangedEvent() {
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
+#if CONFIG_SYMBIOS_VOICE_GATEWAY
+            display->SetStatus("SYMBIOS");
+#else
             display->SetStatus(Lang::Strings::STANDBY);
+#endif
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
