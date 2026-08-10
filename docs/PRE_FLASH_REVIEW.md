@@ -607,3 +607,38 @@ was then promoted to 100 percent traffic. Both the candidate and RAM-loopback
 tags were removed; the public health route returns HTTP 200 and there are no
 revision error logs. No firmware was changed or flashed. One physical
 DOWN/speak/DOWN turn remains the final end-to-end acceptance test.
+
+## End-to-end voice acceptance and English wake-model candidate
+
+The user completed two physical manual turns against Vertex revision
+`symbios-voice-gateway-00019-led` and reported that the device answered spoken
+questions. Aggregate-only logs confirmed input transcription and returned
+response audio for both turns with no provider error. This accepts the mono
+microphone, manual DOWN start/submit path, authenticated gateway, Vertex
+response parser, and device playback.
+
+Hands-free wake remained unsuccessful. The installed model assets contain
+Mandarin `wn9_nihaoxiaozhi_tts`, and the user reported no state change after
+three physical `Ni hao Xiao Zhi` attempts. Commit `857a73d` changes only the
+Symbios build selection to built-in English `wn9_hiesp` (“Hi ESP”); the stock
+build remains unchanged.
+
+The first endpoint review build was rejected before use because it omitted the
+diagnostic flag that currently supplies the proven DOWN-button fallback. Its
+local transfer and redundant regional build were stopped, and it is not a
+flash candidate. Corrected GitHub run `31436825809` passed all four jobs with
+the fallback retained. Regional Cloud Build
+`6f07e1f6-ec84-46a5-955f-27d632827c6a` produced the immutable reviewed
+artifacts.
+
+File-level parsing shows 23 of 24 asset files are byte-identical to the current
+working image; only `srmodels.bin` changes from Mandarin to `wn9_hiesp`.
+Because the working application loads the external model container generically,
+the proposed change is an assets-only write at `0x800000`, not an application
+flash. The exact merged-image SHA-256 is
+`b7a25d9295af0e79c3ba27dbfd87e169059ce18660503f3974e2173c17ee9089`;
+the exact proposed assets SHA-256 is
+`dc15f362a44ca66c5b709b339efed04e44130c2bbf76c5a2dd57338d460be8b1`.
+Full provenance, comparison, risks, and review checklist are in
+`docs/LAFVIN_ENGLISH_WAKE_REVIEW.md`. No serial port was opened and nothing was
+flashed.
