@@ -2,7 +2,8 @@
 
 ## Decision and current state
 
-**Prepared and verified; not flashed. Exact-hash approval is required.**
+**Exact-hash approved, application-flashed, and boot-verified. Physical voice
+acceptance is pending.**
 
 All four RAM-only ES7210 slot auditions recorded and played audio correctly.
 That result establishes that the codec, I2S/TDM input, RAM capture, and local
@@ -80,7 +81,7 @@ protected audio/board changes and the absent factory display/wake/audio smoke
 acknowledgement. The prior audit exception applied to the exact slot-audition
 image; it is not reused for this candidate.
 
-## Review boundary
+## Original review boundary
 
 No serial port was opened and no device bytes were written while preparing or
 validating this correction. The physical device still runs the approved
@@ -93,3 +94,37 @@ and explicitly accept the protected-file audit exception for this exact image.
 Only an application-only write at `0x20000` should then be considered, after
 rehashing the artifact, validating the live partition table, and confirming
 the target device identity.
+
+## Application-only flash and boot result
+
+The user explicitly approved merged-image SHA-256
+`ce951a2678d8ecfe331b8587889097c0f0b2d32ce601fa1de2c476a8af04b954`
+and acknowledged the protected-file audit exception. Immediately before the
+write, both merged and application hashes matched the reviewed values.
+
+The connected target identified as the previously validated ESP32-S3 revision
+0.2 with 8 MB PSRAM and MAC ending `d2:14`. Its live 4,096-byte partition table
+matched the candidate byte-for-byte with SHA-256
+`ce40cfe75056ef74bc052942f8a9ee3dce8e5e14ba17a6f63685a8fa0d11a23d`.
+Live OTA metadata reported sequence 1/state VALID with `ota_0` active at
+`0x20000`.
+
+Only the approved 2,822,096-byte `xiaozhi.bin`, SHA-256
+`5192d8bb3b1a4f8bd1380f6611e56b79eee72ad8e9c3c68d13f26970693fbb8c`,
+was written at `0x20000` using 230400 baud. Esptool erased `0x20000` through
+`0x2d0fff`, wrote the application, verified the flashed-data hash, and
+hard-reset normally. NVS, Wi-Fi and activation state, OTA metadata, PHY data,
+bootloader, partition table, and assets were not written.
+
+The post-flash UART boot confirms compile time `Aug 10 2026 18:05:48`, ESP-IDF
+5.5.2, 8 MB PSRAM, the Symbios SKU, display/backlight, ES8311/ES7210 startup,
+and the explicit mono marker. Retained Wi-Fi connected, the reviewed HTTPS
+gateway bootstrap succeeded, `ota_0` remained active, and activation completed.
+The AFE then reported version `1MIC_V251128`, exactly one microphone and zero
+playback channels, and a WakeNet/VAD pipeline. No panic, rollback, digest
+failure, or activation prompt appeared.
+
+The remaining acceptance step is physical: first try the local wake word. If
+needed, press DOWN once, speak a short sentence, then press DOWN once to submit
+the manual turn. Do not use the slot-audition UP/DOWN sequence; that diagnostic
+mode is absent from this image.

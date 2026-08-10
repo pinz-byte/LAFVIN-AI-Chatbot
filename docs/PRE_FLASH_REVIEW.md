@@ -537,8 +537,22 @@ image byte-for-byte. Binary inspection finds the reviewed endpoint, mono-input
 marker, and manual start/submit markers exactly once; it finds no placeholder
 endpoint, slot-audition marker, or complete private-key block.
 
-The pre-flash audit remains **BLOCKED** on protected audio/board changes and
-the absent factory smoke acknowledgement. This candidate has not been flashed
-and the device was not accessed. Exact-hash approval and a new explicit audit
-exception are required. Full details are in
-`docs/LAFVIN_MONO_MIC_REVIEW.md`.
+The pre-flash audit remained **BLOCKED** on protected audio/board changes and
+the absent factory smoke acknowledgement. At the review boundary this
+candidate had not been flashed and the device had not been accessed. Full
+details are in `docs/LAFVIN_MONO_MIC_REVIEW.md`.
+
+The user subsequently approved merged-image SHA-256
+`ce951a2678d8ecfe331b8587889097c0f0b2d32ce601fa1de2c476a8af04b954`
+and explicitly acknowledged the protected-file audit exception. The live
+ESP32-S3 identity and partition table matched the reviewed target, and OTA
+metadata reported sequence 1/state VALID with `ota_0` active at `0x20000`.
+
+Only the 2,822,096-byte approved application, SHA-256
+`5192d8bb3b1a4f8bd1380f6611e56b79eee72ad8e9c3c68d13f26970693fbb8c`,
+was written at `0x20000`. Esptool verified the flashed-data hash and reset
+normally; no NVS, OTA metadata, PHY, bootloader, partition-table, or asset
+region was written. UART confirms the mono marker, retained Wi-Fi, successful
+gateway bootstrap, activation, `ota_0`, AFE `1MIC_V251128` with one microphone
+and zero playback channels, and WakeNet startup. No panic or rollback occurred.
+Physical wake/manual-turn acceptance remains pending.
