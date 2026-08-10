@@ -2,7 +2,7 @@
 
 ## Decision and current state
 
-**Approved and application-flashed; physical slot audition is pending.**
+**Approved, application-flashed, and physically accepted.**
 
 The candidate is a compile-time-gated diagnostic for the LAFVIN AI ChatBot
 ESP32-S3. It is intended to isolate the unresolved microphone attenuation by
@@ -14,8 +14,10 @@ session-refresh application.
 The user subsequently approved merged-image SHA-256
 `81d4a7d2aee19a4563ff2fc6c8c73db88f057474d4841559821dd89daceb42ef`
 and explicitly acknowledged the temporary button changes and protected-file
-pre-flash audit exception. The approved application is now installed; the
-four-slot physical listening test has not yet been performed.
+pre-flash audit exception. The approved application is installed. On
+2026-08-10 the user completed all four physical slot tests and reported that
+each test recorded and played back the audio perfectly. This accepts the raw
+ES7210 capture, RAM buffer, and local playback path across slots 0 through 3.
 
 ## Diagnostic behavior
 
@@ -144,4 +146,7 @@ successful HTTPS bootstrap to the reviewed endpoint, `ota_0`,
 `Activation done`, transition to idle, and WakeNet/AFE startup. No panic,
 rollback, digest failure, or new activation prompt appeared.
 
-The firmware is installed and awaits the four-slot UP/DOWN physical audition.
+The firmware remains installed. All four UP/DOWN physical auditions passed:
+each selected slot recorded and played back audio perfectly. The diagnostic
+objective is complete; the result rules out a dead ES7210/I2S capture path but
+does not identify any slot as a clean speaker-reference channel.

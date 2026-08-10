@@ -19,6 +19,16 @@
 
 #define TAG "LichuangDevBoard"
 
+#if CONFIG_LAFVIN_MONO_MIC_INPUT && CONFIG_USE_DEVICE_AEC
+#error "LAFVIN mono microphone input requires device-side AEC to be disabled"
+#endif
+
+#if CONFIG_LAFVIN_MONO_MIC_INPUT
+static constexpr bool kLafvinAudioInputReference = false;
+#else
+static constexpr bool kLafvinAudioInputReference = AUDIO_INPUT_REFERENCE;
+#endif
+
 // class Pca9557 : public I2cDevice {
 // public:
 //     Pca9557(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr) {
@@ -50,8 +60,11 @@ public:
                         pa_en_pin, // Use our own PA enable pin
                        AUDIO_CODEC_ES8311_ADDR, 
                        AUDIO_CODEC_ES7210_ADDR, 
-                       AUDIO_INPUT_REFERENCE),
+                       kLafvinAudioInputReference),
           pa_en_pin_(pa_en_pin) {
+#if CONFIG_LAFVIN_MONO_MIC_INPUT
+        ESP_LOGI(TAG, "Mono microphone input: ES7210 TDM slot 0 / MIC1, no AEC reference");
+#endif
     }
 
     virtual void EnableOutput(bool enable) override {

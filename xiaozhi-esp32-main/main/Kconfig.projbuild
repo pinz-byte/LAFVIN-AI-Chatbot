@@ -34,6 +34,17 @@ config LAFVIN_AUDIO_DIAGNOSTIC
         chat-state toggle. No raw audio or credentials are logged. Leave this
         disabled in production firmware.
 
+config LAFVIN_MONO_MIC_INPUT
+    bool "Use LAFVIN ES7210 slot 0 as mono microphone input"
+    depends on BOARD_TYPE_LAFVIN_AICHATBOT
+    default n
+    help
+        Configure the LAFVIN audio codec as one microphone channel sourced from
+        ES7210 TDM slot 0 / MIC1, with no AEC reference channel. Use this when
+        the board has no clean hardware speaker-reference path. Device-side AEC
+        must remain disabled. This option is default-off so the stock LAFVIN
+        build retains its vendor input layout.
+
 config LAFVIN_SLOT_AUDITION
     bool "Enable RAM-only LAFVIN ES7210 slot audition"
     depends on BOARD_TYPE_LAFVIN_AICHATBOT

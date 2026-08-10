@@ -497,5 +497,48 @@ Post-flash UART confirms compile time `Aug 10 2026 17:19:23`, ESP-IDF 5.5.2,
 8 MB PSRAM, the Symbios SKU, display/backlight, ES8311 speaker and ES7210 input
 initialization, retained Wi-Fi, successful authenticated gateway bootstrap,
 `ota_0`, `Activation done`, the idle state, and WakeNet/AFE startup. No panic,
-rollback, digest failure, or activation prompt occurred. The four-slot physical
-UP/DOWN audition remains the final diagnostic acceptance test.
+rollback, digest failure, or activation prompt occurred. At that point, the
+four-slot physical UP/DOWN audition remained the final diagnostic acceptance
+test.
+
+## ES7210 physical result and mono-microphone correction candidate
+
+The user completed all four physical slot auditions on 2026-08-10 and reported
+that every test recorded and played back audio perfectly. This accepts the raw
+ES7210/I2S capture and local playback path and rules out a dead microphone
+transport. It does not establish any captured slot as a clean, time-aligned
+speaker reference.
+
+Source tracing found that the vendor LAFVIN input-reference flag caused normal
+Symbios firmware to open two input channels, present them to the AFE as `MR`,
+and enable device AEC. The most plausible remaining fault is therefore an
+invalid AEC/reference contract that attenuates the real speech channel.
+
+A default-off, LAFVIN-only correction has been prepared. The Symbios variant
+uses ES7210 slot 0 / MIC1 as mono `M` input, declares no reference channel,
+omits device AEC, and has a compile-time guard against enabling both modes.
+The stock LAFVIN variant is unchanged. WakeNet, display, codec output,
+authenticated gateway routing, and manual DOWN-button start/submit remain
+enabled. Provider credentials remain server-side.
+
+Cloud Build job `3d959f4d-926a-4d2a-a687-3caf4ed2856b` passed. The application
+is 2,822,096 bytes with 32% partition free; esptool validates its checksum and
+appended digest. Downloaded artifact hashes match the builder manifest:
+
+- merged image SHA-256:
+  `ce951a2678d8ecfe331b8587889097c0f0b2d32ce601fa1de2c476a8af04b954`;
+- application SHA-256:
+  `5192d8bb3b1a4f8bd1380f6611e56b79eee72ad8e9c3c68d13f26970693fbb8c`;
+- release ZIP SHA-256:
+  `83d91329f4543fd64679bda38658cbf9796dd83f7a8a3c6a77147eb12932a252`.
+
+Partition table, OTA metadata, and assets match the working slot-audition
+image byte-for-byte. Binary inspection finds the reviewed endpoint, mono-input
+marker, and manual start/submit markers exactly once; it finds no placeholder
+endpoint, slot-audition marker, or complete private-key block.
+
+The pre-flash audit remains **BLOCKED** on protected audio/board changes and
+the absent factory smoke acknowledgement. This candidate has not been flashed
+and the device was not accessed. Exact-hash approval and a new explicit audit
+exception are required. Full details are in
+`docs/LAFVIN_MONO_MIC_REVIEW.md`.

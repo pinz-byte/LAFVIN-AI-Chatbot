@@ -44,7 +44,7 @@ def main() -> int:
     args = parser.parse_args()
 
     sdkconfig_append = [
-        "CONFIG_USE_DEVICE_AEC=y",
+        "CONFIG_LAFVIN_MONO_MIC_INPUT=y",
         "CONFIG_LANGUAGE_EN_US=y",
         "CONFIG_SYMBIOS_VOICE_GATEWAY=y",
         f'CONFIG_SYMBIOS_GATEWAY_URL="{args.gateway_url}"',
