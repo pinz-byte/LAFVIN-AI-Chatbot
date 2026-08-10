@@ -42,9 +42,15 @@ class GatewaySettings:
         expected_ws = {"ws", "wss"} if self.allow_insecure_urls else {"wss"}
         if public.scheme not in expected_http or not public.netloc:
             raise ValueError("SYMBIOS_PUBLIC_BASE_URL must be a valid HTTPS URL")
-        if self.voice_provider not in {"vertex_live", "openai_realtime", "proxy"}:
+        if self.voice_provider not in {
+            "vertex_live",
+            "openai_realtime",
+            "proxy",
+            "ram_loopback",
+        }:
             raise ValueError(
-                "SYMBIOS_VOICE_PROVIDER must be vertex_live, openai_realtime, or proxy"
+                "SYMBIOS_VOICE_PROVIDER must be vertex_live, openai_realtime, "
+                "proxy, or ram_loopback"
             )
         if self.voice_provider == "proxy":
             upstream = urlparse(self.upstream_ws_url or "")
@@ -56,7 +62,7 @@ class GatewaySettings:
                 raise ValueError("OPENAI_REALTIME_URL must be a valid WSS URL")
             if not self.openai_api_key:
                 raise ValueError("OPENAI_API_KEY is required for the OpenAI Realtime provider")
-        elif not self.gcp_project:
+        elif self.voice_provider == "vertex_live" and not self.gcp_project:
             raise ValueError("SYMBIOS_GCP_PROJECT is required for Vertex Live")
         if self.store_backend not in {"sqlite", "firestore"}:
             raise ValueError("SYMBIOS_STORE_BACKEND must be sqlite or firestore")

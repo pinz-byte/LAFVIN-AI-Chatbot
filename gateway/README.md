@@ -65,6 +65,14 @@ reviewed Xiaozhi-compatible upstream configured with
 `openai_realtime` provider remains available but requires a funded server-side
 `OPENAI_API_KEY`.
 
+`SYMBIOS_VOICE_PROVIDER=ram_loopback` is an explicit-consent diagnostic only.
+It never opens a provider connection. It keeps at most 20 seconds of one
+gateway-decoded turn in volatile process memory, applies the same reviewed
+input gain, returns that waveform to the authenticated device in real time,
+and zeroes the buffer after playback, abort, or disconnect. It logs aggregate
+levels and byte counts only—never PCM or a transcript—and must be switched
+back to `vertex_live` after the physical listening test.
+
 ## Test
 
 ```sh

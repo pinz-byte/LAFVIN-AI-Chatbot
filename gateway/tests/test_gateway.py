@@ -1,5 +1,6 @@
 import asyncio
 import json
+import struct
 from dataclasses import replace
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from symbios_gateway.app import create_app
 from symbios_gateway.config import GatewaySettings
+from symbios_gateway.loopback import _zero_and_clear, run_ram_loopback_bridge
 from symbios_gateway.security import TokenError, verify_session_token
 from symbios_gateway.storage import GatewayStore
 from symbios_gateway.vertex import (
@@ -167,6 +169,101 @@ def test_production_config_requires_tls(tmp_path: Path) -> None:
             voice_provider="proxy",
             database_path=tmp_path / "gateway.sqlite3",
         )
+
+
+def test_ram_loopback_config_needs_no_provider_credential(tmp_path: Path) -> None:
+    settings = GatewaySettings(
+        public_base_url="https://gateway.test",
+        jwt_secret="j" * 32,
+        admin_token="a" * 32,
+        voice_provider="ram_loopback",
+        database_path=tmp_path / "gateway.sqlite3",
+    )
+
+    assert settings.voice_provider == "ram_loopback"
+
+
+def test_ram_loopback_replays_and_clears_volatile_pcm(
+    settings: GatewaySettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeCodec:
+        instances: list["FakeCodec"] = []
+
+        def __init__(self) -> None:
+            self.clear_count = 0
+            self.output = bytearray()
+            self.__class__.instances.append(self)
+
+        def clear_output(self) -> None:
+            self.clear_count += 1
+            self.output.clear()
+
+        def decode_input_16k(self, _: bytes) -> bytes:
+            return struct.pack("<" + "h" * 320, *([400] * 320))
+
+        def feed_output(self, pcm16: bytes) -> list[bytes]:
+            self.output.extend(pcm16)
+            if len(self.output) < 2880:
+                return []
+            self.output.clear()
+            return [b"loopback-opus"]
+
+        def flush_output(self) -> list[bytes]:
+            if not self.output:
+                return []
+            self.output.clear()
+            return [b"loopback-tail"]
+
+    class FakeWebSocket:
+        def __init__(self) -> None:
+            self.received = iter(
+                [
+                    {
+                        "type": "websocket.receive",
+                        "text": json.dumps({"type": "listen", "state": "start"}),
+                    },
+                    {"type": "websocket.receive", "bytes": b"device-opus"},
+                    {
+                        "type": "websocket.receive",
+                        "text": json.dumps({"type": "listen", "state": "stop"}),
+                    },
+                    {"type": "websocket.disconnect"},
+                ]
+            )
+            self.json_messages: list[dict[str, object]] = []
+            self.binary_messages: list[bytes] = []
+
+        async def receive(self) -> dict[str, object]:
+            return next(self.received)
+
+        async def send_json(self, message: dict[str, object]) -> None:
+            self.json_messages.append(message)
+
+        async def send_bytes(self, message: bytes) -> None:
+            self.binary_messages.append(message)
+
+    import symbios_gateway.loopback as loopback
+
+    monkeypatch.setattr(loopback, "XiaozhiAudioCodec", FakeCodec)
+    websocket = FakeWebSocket()
+    loopback_settings = replace(settings, voice_provider="ram_loopback")
+    asyncio.run(
+        run_ram_loopback_bridge(
+            websocket,  # type: ignore[arg-type]
+            loopback_settings,
+            protocol_version=1,
+        )
+    )
+
+    states = [message.get("state") for message in websocket.json_messages]
+    assert states == [None, "start", None, "stop"]
+    assert websocket.binary_messages == [b"loopback-tail"]
+    assert FakeCodec.instances[0].output == bytearray()
+    assert FakeCodec.instances[0].clear_count >= 2
+
+    secret = bytearray(b"transient-pcm")
+    _zero_and_clear(secret)
+    assert secret == bytearray()
 
 
 def test_vertex_setup_uses_explicit_activity_boundaries(settings: GatewaySettings) -> None:

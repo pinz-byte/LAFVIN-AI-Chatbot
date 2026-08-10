@@ -13,6 +13,7 @@ from websockets.asyncio.client import connect as connect_websocket
 from websockets.exceptions import ConnectionClosed
 
 from .config import GatewaySettings
+from .loopback import RamLoopbackBridgeError, run_ram_loopback_bridge
 from .realtime import RealtimeBridgeError, run_openai_realtime_bridge
 from .security import TokenError, issue_session_token, verify_session_token
 from .storage import FirestoreGatewayStore, GatewayStore, Store
@@ -186,7 +187,11 @@ def create_app(settings: GatewaySettings | None = None, store: Store | None = No
             return
 
         try:
-            if settings.voice_provider in {"openai_realtime", "vertex_live"}:
+            if settings.voice_provider in {
+                "openai_realtime",
+                "vertex_live",
+                "ram_loopback",
+            }:
                 await websocket.accept()
                 try:
                     raw_hello = await asyncio.wait_for(websocket.receive_text(), timeout=8)
@@ -197,7 +202,13 @@ def create_app(settings: GatewaySettings | None = None, store: Store | None = No
                 except (asyncio.TimeoutError, json.JSONDecodeError, TypeError, ValueError):
                     await websocket.close(code=4400, reason="invalid Xiaozhi hello")
                     return
-                if settings.voice_provider == "vertex_live":
+                if settings.voice_provider == "ram_loopback":
+                    await run_ram_loopback_bridge(
+                        websocket,
+                        settings,
+                        protocol_version=protocol_version,
+                    )
+                elif settings.voice_provider == "vertex_live":
                     await run_vertex_live_bridge(
                         websocket,
                         settings,
@@ -263,6 +274,7 @@ def create_app(settings: GatewaySettings | None = None, store: Store | None = No
             WebSocketDisconnect,
             RealtimeBridgeError,
             VertexLiveBridgeError,
+            RamLoopbackBridgeError,
         ):
             if websocket.client_state.name == "CONNECTED":
                 await websocket.close(code=1011, reason="voice backend unavailable")
