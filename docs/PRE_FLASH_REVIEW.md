@@ -556,3 +556,44 @@ region was written. UART confirms the mono marker, retained Wi-Fi, successful
 gateway bootstrap, activation, `ota_0`, AFE `1MIC_V251128` with one microphone
 and zero playback channels, and WakeNet startup. No panic or rollback occurred.
 Physical wake/manual-turn acceptance remains pending.
+
+## RAM-only gateway loopback physical result
+
+The user explicitly approved one temporary RAM-only gateway audio-loopback
+turn and acknowledged that the submitted voice audio would be held only in
+volatile memory and cleared immediately after playback. Gateway commit
+`a9cc892` passed the local suite (`17 passed, 1 skipped`) and Gateway CI. Cloud
+Run revision `symbios-voice-gateway-00016-vol` was deployed behind a zero-
+traffic tag, returned HTTP 200, and matched the production service account,
+Secret Manager bindings, datastore, and gain configuration. Only the provider
+setting differed. It was then temporarily promoted for the physical test.
+
+The authenticated device turn delivered 180 Opus frames, decoded to 345,600
+PCM bytes with mean absolute amplitude 220 and peak 4,200. Playback completed,
+the volatile buffer was cleared, and the user reported hearing their words
+clearly. This accepts the complete microphone/AFE, device Opus encoder,
+authenticated transport, gateway decoder, gain/resampling, gateway Opus
+encoder, device decoder, and speaker path. No raw audio or transcript was
+logged or persisted. Production traffic was then restored to Vertex revision
+`symbios-voice-gateway-00014-sug`, whose public health route returned HTTP 200.
+No firmware was changed or flashed.
+
+## Vertex binary-frame parser correction candidate
+
+The accepted loopback isolates the remaining failure to the Vertex response
+side of the gateway. A metadata-only synthetic probe using the same Vertex
+model and service identity showed that Vertex sends the setup response and all
+subsequent server events as binary WebSocket frames. The gateway already
+accepted the binary setup through `json.loads`, but its response loop then
+discarded every non-string frame before JSON decoding. This exactly accounts
+for the healthy input metrics followed by no transcription, turn-complete
+event, or response audio.
+
+The candidate correction decodes both text and UTF-8 binary JSON frames and
+rejects malformed or non-object payloads. A regression test covers both frame
+types and invalid input. The isolated Python 3.13 suite passes (`18 passed, 1
+skipped`), Python compilation succeeds, and `git diff --check` is clean. This
+is a gateway-only change: it does not alter device firmware, authentication,
+Secret Manager bindings, raw-audio handling, or the public endpoint. It has
+not been deployed; production remains on revision
+`symbios-voice-gateway-00014-sug` pending review.

@@ -15,6 +15,7 @@ from symbios_gateway.security import TokenError, verify_session_token
 from symbios_gateway.storage import GatewayStore
 from symbios_gateway.vertex import (
     VertexBridgeState,
+    _decode_vertex_server_event,
     _handle_vertex_listen_event,
     _record_vertex_input_pcm,
     _vertex_input_mean_abs,
@@ -274,6 +275,16 @@ def test_vertex_setup_uses_explicit_activity_boundaries(settings: GatewaySetting
     assert setup["realtime_input_config"] == {
         "automatic_activity_detection": {"disabled": True}
     }
+
+
+def test_vertex_server_event_decoder_accepts_binary_websocket_json() -> None:
+    payload = {"serverContent": {"turnComplete": True}}
+
+    assert _decode_vertex_server_event(json.dumps(payload)) == payload
+    assert _decode_vertex_server_event(json.dumps(payload).encode("utf-8")) == payload
+    assert _decode_vertex_server_event(b"\xff") is None
+    assert _decode_vertex_server_event("not-json") is None
+    assert _decode_vertex_server_event("[]") is None
 
 
 def test_vertex_manual_turn_sends_explicit_activity_boundaries() -> None:

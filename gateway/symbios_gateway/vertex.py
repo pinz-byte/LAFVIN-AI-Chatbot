@@ -111,6 +111,22 @@ def _field(mapping: dict[str, object], camel: str, snake: str) -> object:
     return mapping.get(camel, mapping.get(snake))
 
 
+def _decode_vertex_server_event(raw_message: object) -> dict[str, object] | None:
+    """Decode JSON carried in either Vertex text or binary WebSocket frames."""
+    if isinstance(raw_message, bytes):
+        try:
+            raw_message = raw_message.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    if not isinstance(raw_message, str):
+        return None
+    try:
+        event = json.loads(raw_message)
+    except json.JSONDecodeError:
+        return None
+    return event if isinstance(event, dict) else None
+
+
 async def _send_xiaozhi_json(websocket: WebSocket, session_id: str, **payload: object) -> None:
     await websocket.send_json({"session_id": session_id, **payload})
 
@@ -182,9 +198,12 @@ async def run_vertex_live_bridge(
     ) as upstream:
         await upstream.send(_vertex_setup(settings))
         try:
-            setup_response = json.loads(await asyncio.wait_for(upstream.recv(), timeout=8))
-        except (asyncio.TimeoutError, json.JSONDecodeError) as exc:
+            raw_setup_response = await asyncio.wait_for(upstream.recv(), timeout=8)
+        except asyncio.TimeoutError as exc:
             raise VertexLiveBridgeError("Vertex Live setup timed out") from exc
+        setup_response = _decode_vertex_server_event(raw_setup_response)
+        if setup_response is None:
+            raise VertexLiveBridgeError("Vertex Live returned an invalid setup response")
         if "setupComplete" not in setup_response and "setup_complete" not in setup_response:
             raise VertexLiveBridgeError("Vertex Live rejected the session setup")
 
@@ -272,11 +291,8 @@ async def run_vertex_live_bridge(
 
         async def vertex_to_device() -> None:
             async for raw_message in upstream:
-                if not isinstance(raw_message, str):
-                    continue
-                try:
-                    event = json.loads(raw_message)
-                except json.JSONDecodeError:
+                event = _decode_vertex_server_event(raw_message)
+                if event is None:
                     continue
                 if "error" in event:
                     error = event.get("error") or {}
