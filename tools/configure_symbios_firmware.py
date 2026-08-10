@@ -30,10 +30,16 @@ def validate_gateway_url(value: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gateway-url", required=True, type=validate_gateway_url)
-    parser.add_argument(
+    diagnostic_mode = parser.add_mutually_exclusive_group()
+    diagnostic_mode.add_argument(
         "--lafvin-audio-diagnostic",
         action="store_true",
         help="enable local input-level logs and the GPIO19 DOWN-button trigger",
+    )
+    diagnostic_mode.add_argument(
+        "--lafvin-slot-audition",
+        action="store_true",
+        help="enable RAM-only ES7210 slot capture and local raw/normalized playback",
     )
     args = parser.parse_args()
 
@@ -45,6 +51,8 @@ def main() -> int:
     ]
     if args.lafvin_audio_diagnostic:
         sdkconfig_append.append("CONFIG_LAFVIN_AUDIO_DIAGNOSTIC=y")
+    if args.lafvin_slot_audition:
+        sdkconfig_append.append("CONFIG_LAFVIN_SLOT_AUDITION=y")
 
     config = {
         "target": "esp32s3",

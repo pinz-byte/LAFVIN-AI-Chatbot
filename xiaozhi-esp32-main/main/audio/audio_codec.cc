@@ -18,6 +18,10 @@ void AudioCodec::OutputData(std::vector<int16_t>& data) {
     Write(data.data(), data.size());
 }
 
+void AudioCodec::OutputData(const int16_t* data, int samples) {
+    Write(data, samples);
+}
+
 bool AudioCodec::InputData(std::vector<int16_t>& data) {
     int samples = Read(data.data(), data.size());
     if (samples > 0) {
@@ -25,6 +29,19 @@ bool AudioCodec::InputData(std::vector<int16_t>& data) {
     }
     return false;
 }
+
+bool AudioCodec::InputData(int16_t* data, int samples) {
+    return Read(data, samples) > 0;
+}
+
+#if CONFIG_LAFVIN_SLOT_AUDITION
+bool AudioCodec::ConfigureInputSlotForAudition(uint8_t slot) {
+    return false;
+}
+
+void AudioCodec::RestoreInputAfterAudition() {
+}
+#endif
 
 void AudioCodec::Start() {
     Settings settings("audio", false);

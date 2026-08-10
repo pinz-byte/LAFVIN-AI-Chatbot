@@ -12,6 +12,11 @@ on:
         required: false
         default: false
         type: boolean
+      lafvin_slot_audition:
+        description: Enable RAM-only LAFVIN ES7210 slot audition
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - codex/feat/symbios-voice-gateway
@@ -75,11 +80,15 @@ jobs:
         env:
           GATEWAY_URL: ${{ inputs.gateway_url }}
           LAFVIN_AUDIO_DIAGNOSTIC: ${{ inputs.lafvin_audio_diagnostic }}
+          LAFVIN_SLOT_AUDITION: ${{ inputs.lafvin_slot_audition }}
         run: |
           . /opt/esp/idf/export.sh
           diagnostic_args=()
           if [[ "$LAFVIN_AUDIO_DIAGNOSTIC" == "true" ]]; then
             diagnostic_args+=(--lafvin-audio-diagnostic)
+          fi
+          if [[ "$LAFVIN_SLOT_AUDITION" == "true" ]]; then
+            diagnostic_args+=(--lafvin-slot-audition)
           fi
           python3 ../tools/configure_symbios_firmware.py \
             --gateway-url "$GATEWAY_URL" \

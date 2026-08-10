@@ -199,16 +199,70 @@ void BoxAudioCodec::EnableInput(bool enable) {
             .sample_rate = (uint32_t)output_sample_rate_,
             .mclk_multiple = 0,
         };
+#if CONFIG_LAFVIN_SLOT_AUDITION
+        if (slot_audition_mode_) {
+            fs.channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(slot_audition_channel_);
+        } else
+#endif
         if (input_reference_) {
             fs.channel_mask |= ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1);
         }
         ESP_ERROR_CHECK(esp_codec_dev_open(input_dev_, &fs));
+#if CONFIG_LAFVIN_SLOT_AUDITION
+        if (slot_audition_mode_) {
+            // ES7210 physical gain numbering differs from its TDM output order:
+            // slot 0/1/2/3 carries MIC1/MIC3/MIC2/MIC4 respectively.
+            static constexpr uint8_t kPhysicalChannelForTdmSlot[] = {0, 2, 1, 3};
+            ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(
+                input_dev_,
+                ESP_CODEC_DEV_MAKE_CHANNEL_MASK(kPhysicalChannelForTdmSlot[slot_audition_channel_]),
+                input_gain_));
+        } else
+#endif
         ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
     } else {
         ESP_ERROR_CHECK(esp_codec_dev_close(input_dev_));
     }
     AudioCodec::EnableInput(enable);
 }
+
+#if CONFIG_LAFVIN_SLOT_AUDITION
+bool BoxAudioCodec::ConfigureInputSlotForAudition(uint8_t slot) {
+    if (slot > 3) {
+        ESP_LOGE(TAG, "Invalid TDM audition slot: %u", static_cast<unsigned>(slot));
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(data_if_mutex_);
+        if (input_enabled_) {
+            if (esp_codec_dev_close(input_dev_) != ESP_CODEC_DEV_OK) {
+                ESP_LOGE(TAG, "Failed to close input before slot audition");
+                return false;
+            }
+            AudioCodec::EnableInput(false);
+        }
+        slot_audition_mode_ = true;
+        slot_audition_channel_ = slot;
+        input_channels_ = 1;
+    }
+
+    EnableInput(true);
+    ESP_LOGI(TAG, "Configured RAM-only audition for TDM slot %u", static_cast<unsigned>(slot));
+    return input_enabled_;
+}
+
+void BoxAudioCodec::RestoreInputAfterAudition() {
+    std::lock_guard<std::mutex> lock(data_if_mutex_);
+    if (input_enabled_) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(input_dev_));
+        AudioCodec::EnableInput(false);
+    }
+    slot_audition_mode_ = false;
+    input_channels_ = input_reference_ ? 2 : 1;
+    ESP_LOGI(TAG, "Restored normal input configuration after slot audition");
+}
+#endif
 
 void BoxAudioCodec::EnableOutput(bool enable) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);

@@ -9,6 +9,9 @@ steps:
         if [[ "${_LAFVIN_AUDIO_DIAGNOSTIC}" == "true" ]]; then
           diagnostic_args+=(--lafvin-audio-diagnostic)
         fi
+        if [[ "${_LAFVIN_SLOT_AUDITION}" == "true" ]]; then
+          diagnostic_args+=(--lafvin-slot-audition)
+        fi
         python3 tools/configure_symbios_firmware.py \
           --gateway-url "${_GATEWAY_URL}" \
           "${diagnostic_args[@]}"
@@ -37,3 +40,4 @@ timeout: 1800s
 
 substitutions:
   _LAFVIN_AUDIO_DIAGNOSTIC: "false"
+  _LAFVIN_SLOT_AUDITION: "false"

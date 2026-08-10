@@ -1,5 +1,9 @@
 #include "audio_service.h"
 #include <esp_log.h>
+#include <esp_heap_caps.h>
+#include <algorithm>
+#include <cinttypes>
+#include <cmath>
 #include <cstring>
 
 #define RATE_CVT_CFG(_src_rate, _dest_rate, _channel)        \
@@ -124,7 +128,11 @@ void AudioService::Initialize(AudioCodec* codec) {
 
 void AudioService::Start() {
     service_stopped_ = false;
-    xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+    xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING
+#if CONFIG_LAFVIN_SLOT_AUDITION
+        | AS_EVENT_SLOT_AUDITION_RUNNING
+#endif
+    );
 
     esp_timer_start_periodic(audio_power_timer_, 1000000);
 
@@ -171,7 +179,11 @@ void AudioService::Stop() {
     service_stopped_ = true;
     xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
         AS_EVENT_WAKE_WORD_RUNNING |
-        AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+        AS_EVENT_AUDIO_PROCESSOR_RUNNING
+#if CONFIG_LAFVIN_SLOT_AUDITION
+        | AS_EVENT_SLOT_AUDITION_RUNNING
+#endif
+    );
 
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
     audio_encode_queue_.clear();
@@ -272,7 +284,11 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
 void AudioService::AudioInputTask() {
     while (true) {
         EventBits_t bits = xEventGroupWaitBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
-            AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING,
+            AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING
+#if CONFIG_LAFVIN_SLOT_AUDITION
+            | AS_EVENT_SLOT_AUDITION_RUNNING
+#endif
+            ,
             pdFALSE, pdFALSE, portMAX_DELAY);
 
         if (service_stopped_) {
@@ -283,6 +299,13 @@ void AudioService::AudioInputTask() {
             vTaskDelay(pdMS_TO_TICKS(120));
             continue;
         }
+
+#if CONFIG_LAFVIN_SLOT_AUDITION
+        if (bits & AS_EVENT_SLOT_AUDITION_RUNNING) {
+            RunSlotAudition();
+            continue;
+        }
+#endif
 
         /* Used for audio testing in NetworkConfiguring mode by clicking the BOOT button */
         if (bits & AS_EVENT_AUDIO_TESTING_RUNNING) {
@@ -328,6 +351,152 @@ void AudioService::AudioInputTask() {
 
     ESP_LOGW(TAG, "Audio input task stopped");
 }
+
+#if CONFIG_LAFVIN_SLOT_AUDITION
+bool AudioService::StartSlotAudition(uint8_t slot, AudioSlotAuditionCallback callback) {
+    if (slot > 3 || slot_audition_running_.exchange(true)) {
+        return false;
+    }
+
+    const EventBits_t running_bits = xEventGroupGetBits(event_group_);
+    const bool restore_wake_word = running_bits & AS_EVENT_WAKE_WORD_RUNNING;
+    const bool restore_voice_processing = running_bits & AS_EVENT_AUDIO_PROCESSOR_RUNNING;
+    EnableVoiceProcessing(false);
+    EnableWakeWordDetection(false);
+    ResetDecoder();
+    {
+        std::lock_guard<std::mutex> lock(slot_audition_mutex_);
+        slot_audition_slot_ = slot;
+        slot_audition_restore_wake_word_ = restore_wake_word;
+        slot_audition_restore_voice_processing_ = restore_voice_processing;
+        slot_audition_callback_ = std::move(callback);
+    }
+    xEventGroupSetBits(event_group_, AS_EVENT_SLOT_AUDITION_RUNNING);
+    ESP_LOGI(TAG, "RAM-only slot audition requested for TDM slot %u", static_cast<unsigned>(slot));
+    return true;
+}
+
+void AudioService::RunSlotAudition() {
+    constexpr int kCaptureSeconds = 3;
+    constexpr int kCaptureChunkSamples = 480;
+    constexpr int kWarmupChunks = 12;
+    constexpr int kNormalizationTargetPeak = 12000;
+    constexpr float kMaximumNormalizationGain = 16.0f;
+
+    AudioSlotAuditionResult result;
+    AudioSlotAuditionCallback callback;
+    bool restore_wake_word = false;
+    bool restore_voice_processing = false;
+    {
+        std::lock_guard<std::mutex> lock(slot_audition_mutex_);
+        result.slot = slot_audition_slot_;
+        restore_wake_word = slot_audition_restore_wake_word_;
+        restore_voice_processing = slot_audition_restore_voice_processing_;
+        callback = slot_audition_callback_;
+    }
+
+    esp_timer_stop(audio_power_timer_);
+    esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+    last_input_time_ = std::chrono::steady_clock::now();
+
+    const size_t capture_samples = static_cast<size_t>(codec_->input_sample_rate()) * kCaptureSeconds;
+    auto* capture = static_cast<int16_t*>(heap_caps_malloc(
+        capture_samples * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (capture == nullptr) {
+        ESP_LOGE(TAG, "Unable to allocate PSRAM for slot audition");
+    } else if (!codec_->ConfigureInputSlotForAudition(result.slot)) {
+        ESP_LOGE(TAG, "Unable to configure TDM slot %u for audition", static_cast<unsigned>(result.slot));
+    } else {
+        int16_t warmup[kCaptureChunkSamples] = {};
+        for (int i = 0; i < kWarmupChunks; ++i) {
+            codec_->InputData(warmup, kCaptureChunkSamples);
+        }
+
+        bool capture_ok = true;
+        for (size_t offset = 0; offset < capture_samples; offset += kCaptureChunkSamples) {
+            const int samples = static_cast<int>(std::min(
+                static_cast<size_t>(kCaptureChunkSamples), capture_samples - offset));
+            if (!codec_->InputData(capture + offset, samples)) {
+                capture_ok = false;
+                ESP_LOGE(TAG, "Slot audition capture failed at sample %u", static_cast<unsigned>(offset));
+                break;
+            }
+        }
+
+        codec_->RestoreInputAfterAudition();
+        if (capture_ok) {
+            uint64_t absolute_sum = 0;
+            for (size_t i = 0; i < capture_samples; ++i) {
+                const int32_t sample = capture[i];
+                const uint32_t magnitude = sample < 0
+                    ? static_cast<uint32_t>(-sample)
+                    : static_cast<uint32_t>(sample);
+                absolute_sum += magnitude;
+                result.peak = std::max(result.peak, magnitude);
+                if (magnitude >= 32760) {
+                    ++result.clipped_samples;
+                }
+            }
+            result.mean_abs = static_cast<uint32_t>(absolute_sum / capture_samples);
+            if (result.peak > 0 && result.peak < kNormalizationTargetPeak) {
+                result.normalized_gain = std::min(
+                    kMaximumNormalizationGain,
+                    static_cast<float>(kNormalizationTargetPeak) / result.peak);
+            }
+
+            if (!codec_->output_enabled()) {
+                codec_->EnableOutput(true);
+            }
+            esp_timer_stop(audio_power_timer_);
+            esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+            last_output_time_ = std::chrono::steady_clock::now();
+            ESP_LOGI(TAG,
+                "Slot audition playback raw: slot=%u samples=%u mean_abs=%" PRIu32
+                " peak=%" PRIu32 " clipped=%" PRIu32,
+                static_cast<unsigned>(result.slot), static_cast<unsigned>(capture_samples),
+                result.mean_abs, result.peak, result.clipped_samples);
+            codec_->OutputData(capture, static_cast<int>(capture_samples));
+            last_output_time_ = std::chrono::steady_clock::now();
+            vTaskDelay(pdMS_TO_TICKS(500));
+
+            if (result.normalized_gain > 1.0f) {
+                for (size_t i = 0; i < capture_samples; ++i) {
+                    const int32_t scaled = static_cast<int32_t>(std::lround(
+                        static_cast<float>(capture[i]) * result.normalized_gain));
+                    capture[i] = static_cast<int16_t>(
+                        std::clamp<int32_t>(scaled, -32768, 32767));
+                }
+            }
+            ESP_LOGI(TAG, "Slot audition playback normalized: gain=%.2f", result.normalized_gain);
+            codec_->OutputData(capture, static_cast<int>(capture_samples));
+            last_output_time_ = std::chrono::steady_clock::now();
+            result.success = true;
+        }
+    }
+
+    if (capture != nullptr) {
+        heap_caps_free(capture);
+    }
+    codec_->RestoreInputAfterAudition();
+    xEventGroupClearBits(event_group_, AS_EVENT_SLOT_AUDITION_RUNNING);
+    slot_audition_running_.store(false);
+    {
+        std::lock_guard<std::mutex> lock(slot_audition_mutex_);
+        slot_audition_restore_wake_word_ = false;
+        slot_audition_restore_voice_processing_ = false;
+        slot_audition_callback_ = nullptr;
+    }
+    if (restore_voice_processing) {
+        EnableVoiceProcessing(true);
+    }
+    if (restore_wake_word) {
+        EnableWakeWordDetection(true);
+    }
+    if (callback) {
+        callback(result);
+    }
+}
+#endif
 
 void AudioService::AudioOutputTask() {
     while (true) {

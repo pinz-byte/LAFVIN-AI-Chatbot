@@ -25,8 +25,15 @@ public:
     virtual void EnableOutput(bool enable);
 
     virtual void OutputData(std::vector<int16_t>& data);
+    virtual void OutputData(const int16_t* data, int samples);
     virtual bool InputData(std::vector<int16_t>& data);
+    virtual bool InputData(int16_t* data, int samples);
     virtual void Start();
+
+#if CONFIG_LAFVIN_SLOT_AUDITION
+    virtual bool ConfigureInputSlotForAudition(uint8_t slot);
+    virtual void RestoreInputAfterAudition();
+#endif
 
     inline bool duplex() const { return duplex_; }
     inline bool input_reference() const { return input_reference_; }

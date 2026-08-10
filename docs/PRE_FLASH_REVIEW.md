@@ -435,3 +435,42 @@ entry. The temporary tag was then removed and the revision was promoted to 100
 percent traffic. The public health route returns HTTP 200. The device firmware
 was not changed or flashed. A physical DOWN/speak/DOWN turn remains the final
 live acceptance check.
+
+## RAM-only ES7210 slot-audition candidate
+
+The 4x gateway input gain did not establish which ES7210 input slot contains
+the strongest acoustic microphone signal. A default-off LAFVIN-only diagnostic
+has therefore been prepared to isolate that hardware question before making
+another cloud or wake-word change. UP selects a raw TDM slot; DOWN records three
+seconds into PSRAM and plays the raw and bounded-normalized PCM through the
+local speaker. The path bypasses AFE, AEC, resampling, Opus, and all network
+transport, does not persist PCM, and restores the exact prior wake/voice state.
+
+Regional Cloud Build job `ba19a494-e944-478d-9e3e-55108d047d09` completed the
+ESP-IDF 5.5.2 build successfully. The 2,827,072-byte application has 32% of its
+partition free and passes esptool checksum and appended-digest validation. The
+downloaded builder checksums match:
+
+- merged image SHA-256:
+  `81d4a7d2aee19a4563ff2fc6c8c73db88f057474d4841559821dd89daceb42ef`;
+- application SHA-256:
+  `ef0c7da14a3c9fc9e44633d3eb060cb4091b309fbe744cbf38f5836e7331941c`;
+- release ZIP SHA-256:
+  `c6b94a62c74028e9ee0d1caba6e751088a5b94ac285a3a82f9f106aca3b6e193`.
+
+Offline inspection finds the reviewed endpoint exactly once, no `.invalid`
+endpoint, no complete PEM private-key block, and no common API-key/token or JWT
+shape. Partition and OTA metadata match the prior reviewed image exactly. All
+display/font/emotion assets are byte-identical; the regenerated WakeNet
+container has a different file order, but every contained model file is
+byte-identical.
+
+The pre-flash audit remains intentionally **BLOCKED** because seven protected
+audio/board sources changed and the factory display/wake/audio acknowledgement
+is absent. Full implementation, privacy boundary, artifact provenance, binary
+comparison, risks, and reviewer checklist are in
+`docs/ES7210_SLOT_AUDITION_REVIEW.md`.
+
+This candidate has not been flashed. No serial port was opened and the device
+still runs the previously approved session-refresh image. A separate approval
+naming the exact candidate hash is required before any later flash action.

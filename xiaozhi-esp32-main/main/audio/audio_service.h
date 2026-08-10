@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -51,6 +52,9 @@
 #define AS_EVENT_WAKE_WORD_RUNNING          (1 << 1)
 #define AS_EVENT_AUDIO_PROCESSOR_RUNNING    (1 << 2)
 #define AS_EVENT_PLAYBACK_NOT_EMPTY         (1 << 3)
+#if CONFIG_LAFVIN_SLOT_AUDITION
+#define AS_EVENT_SLOT_AUDITION_RUNNING      (1 << 4)
+#endif
 
 #define AS_OPUS_GET_FRAME_DRU_ENUM(duration_ms)                   \
     ((duration_ms) == 5 ? ESP_OPUS_ENC_FRAME_DURATION_5_MS :      \
@@ -102,6 +106,19 @@ struct DebugStatistics {
     uint32_t playback_count = 0;
 };
 
+#if CONFIG_LAFVIN_SLOT_AUDITION
+struct AudioSlotAuditionResult {
+    bool success = false;
+    uint8_t slot = 0;
+    uint32_t mean_abs = 0;
+    uint32_t peak = 0;
+    uint32_t clipped_samples = 0;
+    float normalized_gain = 1.0f;
+};
+
+using AudioSlotAuditionCallback = std::function<void(const AudioSlotAuditionResult&)>;
+#endif
+
 class AudioService {
 public:
     AudioService();
@@ -133,6 +150,11 @@ public:
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);
+
+#if CONFIG_LAFVIN_SLOT_AUDITION
+    bool StartSlotAudition(uint8_t slot, AudioSlotAuditionCallback callback);
+    bool IsSlotAuditionRunning() const { return slot_audition_running_.load(); }
+#endif
 
 private:
     AudioCodec* codec_ = nullptr;
@@ -180,6 +202,15 @@ private:
     bool service_stopped_ = true;
     bool audio_input_need_warmup_ = false;
 
+#if CONFIG_LAFVIN_SLOT_AUDITION
+    std::atomic_bool slot_audition_running_{false};
+    uint8_t slot_audition_slot_ = 0;
+    bool slot_audition_restore_wake_word_ = false;
+    bool slot_audition_restore_voice_processing_ = false;
+    std::mutex slot_audition_mutex_;
+    AudioSlotAuditionCallback slot_audition_callback_;
+#endif
+
     esp_timer_handle_t audio_power_timer_ = nullptr;
     std::chrono::steady_clock::time_point last_input_time_;
     std::chrono::steady_clock::time_point last_output_time_;
@@ -190,6 +221,9 @@ private:
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckAndUpdateAudioPowerState();
+#if CONFIG_LAFVIN_SLOT_AUDITION
+    void RunSlotAudition();
+#endif
 };
 
 #endif

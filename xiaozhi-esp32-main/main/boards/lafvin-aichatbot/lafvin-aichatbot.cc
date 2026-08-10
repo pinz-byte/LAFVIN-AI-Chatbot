@@ -15,6 +15,7 @@
 #include <esp_lcd_touch_ft5x06.h>
 #include <esp_lvgl_port.h>
 #include <lvgl.h>
+#include <cstdio>
 
 #define TAG "LichuangDevBoard"
 
@@ -65,7 +66,7 @@ private:
     i2c_master_bus_handle_t i2c_bus_;
     // i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
-#if CONFIG_LAFVIN_AUDIO_DIAGNOSTIC
+#if CONFIG_LAFVIN_AUDIO_DIAGNOSTIC || CONFIG_LAFVIN_SLOT_AUDITION
     Button down_button_;
 #endif
     Display* display_;
@@ -74,6 +75,75 @@ private:
 
     const gpio_num_t lcd_cs_pin_ = GPIO_NUM_47;    // Choose an available GPIO pin as LCD chip select
     const gpio_num_t pa_en_pin_ = GPIO_NUM_48;     // Choose an available GPIO pin as PA enable
+
+#if CONFIG_LAFVIN_SLOT_AUDITION
+    uint8_t audition_slot_ = 0;
+
+    static const char* AuditionSlotLabel(uint8_t slot) {
+        // ES7210 physical microphone order on the TDM bus is MIC1, MIC3, MIC2, MIC4.
+        static constexpr const char* kLabels[] = {"MIC1", "MIC3", "MIC2", "MIC4"};
+        return slot < 4 ? kLabels[slot] : "invalid";
+    }
+
+    void ShowAuditionSlot() {
+        char message[96];
+        std::snprintf(message, sizeof(message),
+            "TDM slot %u / %s\nUP: next slot\nDOWN: record 3 seconds",
+            static_cast<unsigned>(audition_slot_), AuditionSlotLabel(audition_slot_));
+        display_->SetStatus("Slot audition");
+        display_->SetChatMessage("system", message);
+    }
+
+    void StartAudition() {
+        auto& app = Application::GetInstance();
+        auto& audio_service = app.GetAudioService();
+        if (app.GetDeviceState() != kDeviceStateIdle) {
+            display_->SetStatus("Audition unavailable");
+            display_->SetChatMessage("system", "Wait for standby, then press DOWN.");
+            return;
+        }
+        if (audio_service.IsSlotAuditionRunning()) {
+            display_->SetStatus("Audition running");
+            return;
+        }
+
+        char prompt[128];
+        std::snprintf(prompt, sizeof(prompt),
+            "Slot %u / %s\nSpeak for 3 seconds.\nThen hear raw, pause, normalized.",
+            static_cast<unsigned>(audition_slot_), AuditionSlotLabel(audition_slot_));
+        display_->SetStatus("Recording to RAM");
+        display_->SetChatMessage("system", prompt);
+
+        const uint8_t requested_slot = audition_slot_;
+        const bool started = audio_service.StartSlotAudition(
+            requested_slot,
+            [this](const AudioSlotAuditionResult& result) {
+                Application::GetInstance().Schedule([this, result]() {
+                    char summary[192];
+                    if (result.success) {
+                        std::snprintf(summary, sizeof(summary),
+                            "Slot %u / %s complete\nmean=%lu peak=%lu clipped=%lu\nraw + %.2fx played\nUP: next, DOWN: repeat",
+                            static_cast<unsigned>(result.slot), AuditionSlotLabel(result.slot),
+                            static_cast<unsigned long>(result.mean_abs),
+                            static_cast<unsigned long>(result.peak),
+                            static_cast<unsigned long>(result.clipped_samples),
+                            static_cast<double>(result.normalized_gain));
+                        display_->SetStatus("Audition complete");
+                    } else {
+                        std::snprintf(summary, sizeof(summary),
+                            "Slot %u / %s failed\nNo audio left RAM or reached the cloud.",
+                            static_cast<unsigned>(result.slot), AuditionSlotLabel(result.slot));
+                        display_->SetStatus("Audition failed");
+                    }
+                    display_->SetChatMessage("system", summary);
+                });
+            });
+        if (!started) {
+            display_->SetStatus("Audition busy");
+            ShowAuditionSlot();
+        }
+    }
+#endif
 
 
     void InitializeI2c() {
@@ -122,6 +192,15 @@ private:
 
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
+#if CONFIG_LAFVIN_SLOT_AUDITION
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateIdle &&
+                !app.GetAudioService().IsSlotAuditionRunning()) {
+                audition_slot_ = static_cast<uint8_t>((audition_slot_ + 1) % 4);
+                ShowAuditionSlot();
+            }
+            return;
+#else
             auto& app = Application::GetInstance();
             // During startup (before connected), pressing BOOT button enters Wi-Fi config mode without reboot
             if (app.GetDeviceState() == kDeviceStateStarting) {
@@ -129,9 +208,14 @@ private:
                 return;
             }
             app.ToggleChatState();
+#endif
         });
 
-#if CONFIG_LAFVIN_AUDIO_DIAGNOSTIC
+#if CONFIG_LAFVIN_SLOT_AUDITION
+        down_button_.OnClick([this]() {
+            StartAudition();
+        });
+#elif CONFIG_LAFVIN_AUDIO_DIAGNOSTIC
         down_button_.OnClick([]() {
             auto& app = Application::GetInstance();
             const auto state = app.GetDeviceState();
@@ -287,7 +371,7 @@ private:
 
 public:
     LichuangDevBoard() : boot_button_(BOOT_BUTTON_GPIO)
-#if CONFIG_LAFVIN_AUDIO_DIAGNOSTIC
+#if CONFIG_LAFVIN_AUDIO_DIAGNOSTIC || CONFIG_LAFVIN_SLOT_AUDITION
         , down_button_(GPIO_NUM_19)
 #endif
     {

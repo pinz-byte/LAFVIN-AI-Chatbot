@@ -34,6 +34,18 @@ config LAFVIN_AUDIO_DIAGNOSTIC
         chat-state toggle. No raw audio or credentials are logged. Leave this
         disabled in production firmware.
 
+config LAFVIN_SLOT_AUDITION
+    bool "Enable RAM-only LAFVIN ES7210 slot audition"
+    depends on BOARD_TYPE_LAFVIN_AICHATBOT
+    default n
+    help
+        Build a review-only local diagnostic that repurposes the documented UP
+        and DOWN buttons. UP selects one of the four raw ES7210 TDM slots;
+        DOWN captures three seconds directly into PSRAM, then plays the raw and
+        bounded-normalized PCM through the local speaker. The capture bypasses
+        AFE, AEC, resampling, Opus, and cloud transport. It is never persisted
+        or transmitted. Leave this disabled in production firmware.
+
 choice
     prompt "Flash Assets"
     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE

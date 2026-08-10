@@ -21,6 +21,11 @@ private:
     esp_codec_dev_handle_t input_dev_ = nullptr;
     std::mutex data_if_mutex_;
 
+#if CONFIG_LAFVIN_SLOT_AUDITION
+    bool slot_audition_mode_ = false;
+    uint8_t slot_audition_channel_ = 0;
+#endif
+
     void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din);
 
     virtual int Read(int16_t* dest, int samples) override;
@@ -35,6 +40,11 @@ public:
     virtual void SetOutputVolume(int volume) override;
     virtual void EnableInput(bool enable) override;
     virtual void EnableOutput(bool enable) override;
+
+#if CONFIG_LAFVIN_SLOT_AUDITION
+    virtual bool ConfigureInputSlotForAudition(uint8_t slot) override;
+    virtual void RestoreInputAfterAudition() override;
+#endif
 };
 
 #endif // _BOX_AUDIO_CODEC_H
