@@ -46,6 +46,8 @@ def main() -> int:
     sdkconfig_append = [
         "CONFIG_LAFVIN_MONO_MIC_INPUT=y",
         "CONFIG_LANGUAGE_EN_US=y",
+        "CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=n",
+        "CONFIG_SR_WN_WN9_HIESP=y",
         "CONFIG_SYMBIOS_VOICE_GATEWAY=y",
         f'CONFIG_SYMBIOS_GATEWAY_URL="{args.gateway_url}"',
     ]
