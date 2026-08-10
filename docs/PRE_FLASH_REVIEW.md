@@ -402,6 +402,13 @@ seconds. The raw decoded turn measured mean absolute amplitude 158 and peak
 event. The WebSocket remained open after submission, proving that the device
 returned to its local standby UI rather than shutting down.
 
+Two subsequent UART-capture attempts opened the CP210x serial port and each
+caused a fresh ESP32-S3 `POWERON` boot plus a new OTA bootstrap request. The
+serial adapter resets this board when the port is opened even when DTR/RTS are
+pre-cleared, so those operator-induced boots are not evidence of a spontaneous
+post-turn crash. Further acceptance checks use gateway telemetry and avoid
+opening the serial port.
+
 Current upstream support for the matching Lichuang/SZPI ES7210 design confirms
 that TDM slot 0 is physical MIC1 and slot 1 is the physical MIC3 playback
 reference. It uses 28 dB for MIC1 and mutes MIC3; the LAFVIN firmware already
@@ -415,5 +422,16 @@ audio, change authentication, expose a credential, modify the endpoint, or
 alter/flash the device firmware. The gain is constrained to the range 1x-16x
 and can be configured through the non-secret `VERTEX_INPUT_GAIN` environment
 setting. Local gateway tests pass (`15 passed, 1 skipped`) and Python
-compilation succeeds. Deployment and a physical acceptance turn remain
-pending.
+compilation succeeds.
+
+Commit `88c2fc2` was built successfully by regional Cloud Build job
+`14d12225-916c-4550-93cd-95c5d2bbaf24`. The pushed image digest is
+`sha256:1d65d6abc1b285185e1fbde56468f19a63c9c35a513c63abb0d7222b02a3351c`.
+Cloud Run revision `symbios-voice-gateway-00014-sug` first served zero percent
+of production traffic behind a temporary preflight tag; its health route
+returned HTTP 200, its service account and both Secret Manager bindings
+matched production, and `VERTEX_INPUT_GAIN=4.0` was the only new environment
+entry. The temporary tag was then removed and the revision was promoted to 100
+percent traffic. The public health route returns HTTP 200. The device firmware
+was not changed or flashed. A physical DOWN/speak/DOWN turn remains the final
+live acceptance check.
