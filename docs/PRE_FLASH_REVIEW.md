@@ -474,3 +474,28 @@ comparison, risks, and reviewer checklist are in
 This candidate has not been flashed. No serial port was opened and the device
 still runs the previously approved session-refresh image. A separate approval
 naming the exact candidate hash is required before any later flash action.
+
+## ES7210 slot-audition application flash and boot result
+
+The user explicitly approved merged-image SHA-256
+`81d4a7d2aee19a4563ff2fc6c8c73db88f057474d4841559821dd89daceb42ef`
+and acknowledged the temporary button behavior and protected-file pre-flash
+audit exception. Immediately before writing, the approved merged and
+application hashes were rechecked and the ESP32-S3 image checksum and appended
+digest were valid.
+
+The live ESP32-S3 revision 0.2 reported 8 MB PSRAM and the previously validated
+identity. Its partition table matched the candidate byte-for-byte. Only the
+2,827,072-byte approved application, SHA-256
+`ef0c7da14a3c9fc9e44633d3eb060cb4091b309fbe744cbf38f5836e7331941c`,
+was written at `0x20000`. Esptool erased `0x20000` through `0x2d2fff`, wrote at
+230400 baud, verified the flashed-data hash, and hard-reset normally. NVS,
+Wi-Fi and activation state, OTA metadata, PHY data, bootloader, partition
+table, and assets were not written.
+
+Post-flash UART confirms compile time `Aug 10 2026 17:19:23`, ESP-IDF 5.5.2,
+8 MB PSRAM, the Symbios SKU, display/backlight, ES8311 speaker and ES7210 input
+initialization, retained Wi-Fi, successful authenticated gateway bootstrap,
+`ota_0`, `Activation done`, the idle state, and WakeNet/AFE startup. No panic,
+rollback, digest failure, or activation prompt occurred. The four-slot physical
+UP/DOWN audition remains the final diagnostic acceptance test.

@@ -1,19 +1,21 @@
 # ES7210 RAM-only slot-audition review
 
-## Decision
+## Decision and current state
 
-**HOLD — review only. Do not flash this image.**
+**Approved and application-flashed; physical slot audition is pending.**
 
 The candidate is a compile-time-gated diagnostic for the LAFVIN AI ChatBot
 ESP32-S3. It is intended to isolate the unresolved microphone attenuation by
 auditioning each raw ES7210 TDM slot locally. The build completed and its
-artifacts passed offline integrity checks, but none of its runtime behavior has
-been exercised on the board.
+artifacts passed offline integrity checks. At the original review boundary, no
+serial port had been opened and the device still ran the previously approved
+session-refresh application.
 
-No serial port was opened and no device partition was read, erased, or written
-while preparing this package. The device therefore remains on the previously
-approved session-refresh application represented by merged-image SHA-256
-`bc0c96f262b2f4ce48e8045f596d9934a2e194b9a391116a55139e9ef484b630`.
+The user subsequently approved merged-image SHA-256
+`81d4a7d2aee19a4563ff2fc6c8c73db88f057474d4841559821dd89daceb42ef`
+and explicitly acknowledged the temporary button changes and protected-file
+pre-flash audit exception. The approved application is now installed; the
+four-slot physical listening test has not yet been performed.
 
 ## Diagnostic behavior
 
@@ -120,4 +122,26 @@ not waived checks.
 - Require a separate approval that names the exact merged-image SHA-256 before
   any later flash action.
 
-Until all items are accepted, the candidate remains a prepared artifact only.
+## Application-only flash and boot result
+
+Immediately before writing, the approved merged image and extracted
+application were rehashed, and esptool revalidated the ESP32-S3 image checksum
+and appended digest. The live device identified as the previously validated
+ESP32-S3 revision 0.2 with 8 MB PSRAM and MAC ending `d2:14`. Its live partition
+table was read at `0x8000` and matched the candidate byte-for-byte with SHA-256
+`ce40cfe75056ef74bc052942f8a9ee3dce8e5e14ba17a6f63685a8fa0d11a23d`.
+
+Only the 2,827,072-byte approved `xiaozhi.bin` was written at `0x20000`.
+Esptool erased `0x20000` through `0x2d2fff`, wrote at 230400 baud, verified the
+flashed-data hash, and hard-reset normally. NVS, Wi-Fi and activation state,
+OTA metadata, PHY data, bootloader, partition table, and display/WakeNet assets
+were not written.
+
+The filtered post-flash UART boot confirms compile time
+`Aug 10 2026 17:19:23`, ESP-IDF 5.5.2, 8 MB PSRAM, the Symbios SKU, display and
+backlight initialization, ES8311/ES7210 initialization, retained Wi-Fi,
+successful HTTPS bootstrap to the reviewed endpoint, `ota_0`,
+`Activation done`, transition to idle, and WakeNet/AFE startup. No panic,
+rollback, digest failure, or new activation prompt appeared.
+
+The firmware is installed and awaits the four-slot UP/DOWN physical audition.
