@@ -391,3 +391,29 @@ traffic. Both the reviewed device URL and Cloud Run's project-number URL return
 healthy. The service account, nine environment entries, two Secret Manager
 bindings, device firmware, and reviewed public endpoint are unchanged. A new
 physical DOWN/speak/DOWN exchange is required for final live acceptance.
+
+## Attenuated-input gateway correction
+
+The next physical exchange reached the same deployed gateway end to end. The
+device opened its authenticated WebSocket, sent `listen.start`, delivered 119
+Opus frames (228,480 decoded PCM bytes), and sent `listen.stop` after 7.14
+seconds. The raw decoded turn measured mean absolute amplitude 158 and peak
+2,761. Vertex returned no transcription, response audio, or turn-complete
+event. The WebSocket remained open after submission, proving that the device
+returned to its local standby UI rather than shutting down.
+
+Current upstream support for the matching Lichuang/SZPI ES7210 design confirms
+that TDM slot 0 is physical MIC1 and slot 1 is the physical MIC3 playback
+reference. It uses 28 dB for MIC1 and mutes MIC3; the LAFVIN firmware already
+uses the same slots with 30 dB on MIC1. A firmware channel-map change is
+therefore not justified by the evidence.
+
+The staged gateway-only correction applies a bounded 4x gain to decoded PCM16
+immediately before it is sent to Vertex. Raw aggregate metrics remain measured
+before gain, and the scaler clips safely at PCM16 limits. It does not persist
+audio, change authentication, expose a credential, modify the endpoint, or
+alter/flash the device firmware. The gain is constrained to the range 1x-16x
+and can be configured through the non-secret `VERTEX_INPUT_GAIN` environment
+setting. Local gateway tests pass (`15 passed, 1 skipped`) and Python
+compilation succeeds. Deployment and a physical acceptance turn remain
+pending.

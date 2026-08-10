@@ -13,7 +13,7 @@ from fastapi import WebSocket
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from websockets.asyncio.client import connect as connect_websocket
 
-from .audio import XiaozhiAudioCodec, unwrap_opus_frame, wrap_opus_frame
+from .audio import XiaozhiAudioCodec, amplify_pcm16, unwrap_opus_frame, wrap_opus_frame
 from .config import GatewaySettings
 
 
@@ -216,6 +216,7 @@ async def run_vertex_live_bridge(
                     except (ValueError, RuntimeError) as exc:
                         raise VertexLiveBridgeError("invalid device audio frame") from exc
                     _record_vertex_input_pcm(state, pcm16)
+                    pcm16 = amplify_pcm16(pcm16, settings.vertex_input_gain)
                     await upstream.send(
                         json.dumps(
                             {

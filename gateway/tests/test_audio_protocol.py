@@ -6,6 +6,7 @@ from symbios_gateway.audio import (
     INPUT_FRAME_SAMPLES,
     OUTPUT_FRAME_BYTES,
     XiaozhiAudioCodec,
+    amplify_pcm16,
     unwrap_opus_frame,
     wrap_opus_frame,
 )
@@ -28,6 +29,24 @@ def test_xiaozhi_v3_rejects_non_audio_packet() -> None:
     packet = struct.pack("!BBH", 1, 0, 3) + b"abc"
     with pytest.raises(ValueError, match="invalid"):
         unwrap_opus_frame(packet, 3)
+
+
+def test_pcm16_amplification_scales_and_saturates() -> None:
+    pcm = struct.pack("<hhhh", 100, -100, 20_000, -20_000)
+
+    assert struct.unpack("<hhhh", amplify_pcm16(pcm, 4.0)) == (
+        400,
+        -400,
+        32_767,
+        -32_768,
+    )
+
+
+def test_pcm16_amplification_rejects_invalid_input() -> None:
+    with pytest.raises(ValueError, match="odd byte"):
+        amplify_pcm16(b"\x00", 4.0)
+    with pytest.raises(ValueError, match="at least"):
+        amplify_pcm16(b"\x00\x00", 0.5)
 
 
 def test_opus_decode_and_encode_paths() -> None:

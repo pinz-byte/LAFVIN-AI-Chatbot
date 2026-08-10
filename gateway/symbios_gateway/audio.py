@@ -13,6 +13,23 @@ OUTPUT_FRAME_SAMPLES = OUTPUT_SAMPLE_RATE * FRAME_DURATION_MS // 1000
 OUTPUT_FRAME_BYTES = OUTPUT_FRAME_SAMPLES * 2
 
 
+def amplify_pcm16(pcm16: bytes, gain: float) -> bytes:
+    """Apply a bounded linear gain to little-endian PCM16 samples."""
+    if len(pcm16) % 2:
+        raise ValueError("PCM16 payload has an odd byte count")
+    if gain < 1.0:
+        raise ValueError("PCM16 gain must be at least 1.0")
+    if gain == 1.0:
+        return pcm16
+
+    amplified = bytearray(len(pcm16))
+    for offset, (sample,) in enumerate(struct.iter_unpack("<h", pcm16)):
+        scaled = round(sample * gain)
+        clipped = min(32767, max(-32768, scaled))
+        struct.pack_into("<h", amplified, offset * 2, clipped)
+    return bytes(amplified)
+
+
 def unwrap_opus_frame(packet: bytes, protocol_version: int) -> bytes:
     if protocol_version == 2:
         if len(packet) < 12:

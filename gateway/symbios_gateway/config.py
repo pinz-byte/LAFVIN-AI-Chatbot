@@ -31,6 +31,7 @@ class GatewaySettings:
     voice_instructions: str = DEFAULT_INSTRUCTIONS
     vertex_location: str = "us-central1"
     vertex_live_model: str = "gemini-live-2.5-flash-native-audio"
+    vertex_input_gain: float = 4.0
     session_ttl_seconds: int = 300
     activation_ttl_seconds: int = 600
     allow_insecure_urls: bool = False
@@ -61,6 +62,8 @@ class GatewaySettings:
             raise ValueError("SYMBIOS_STORE_BACKEND must be sqlite or firestore")
         if self.store_backend == "firestore" and not self.gcp_project:
             raise ValueError("SYMBIOS_GCP_PROJECT is required for Firestore")
+        if not 1.0 <= self.vertex_input_gain <= 16.0:
+            raise ValueError("Vertex input gain must be between 1.0 and 16.0")
         if len(self.jwt_secret) < 32:
             raise ValueError("SYMBIOS_JWT_SECRET must contain at least 32 characters")
         if len(self.admin_token) < 32:
@@ -101,6 +104,7 @@ class GatewaySettings:
             vertex_live_model=os.environ.get(
                 "VERTEX_LIVE_MODEL", "gemini-live-2.5-flash-native-audio"
             ),
+            vertex_input_gain=float(os.environ.get("VERTEX_INPUT_GAIN", "4.0")),
             database_path=Path(os.environ.get("SYMBIOS_DB_PATH", "/data/symbios-gateway.sqlite3")),
             session_ttl_seconds=int(os.environ.get("SYMBIOS_SESSION_TTL_SECONDS", "300")),
             activation_ttl_seconds=int(os.environ.get("SYMBIOS_ACTIVATION_TTL_SECONDS", "600")),
