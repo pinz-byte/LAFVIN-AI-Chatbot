@@ -134,3 +134,38 @@ No serial port was opened, and no bytes were written to the device while
 preparing this review. Flashing requires a separate approval naming both the
 merged-image SHA-256 and the proposed assets SHA-256, plus acknowledgement of
 the assets/protected-file audit exception.
+
+## Approved assets-only flash result
+
+The user explicitly approved merged-image SHA-256
+`b7a25d9295af0e79c3ba27dbfd87e169059ce18660503f3974e2173c17ee9089`
+and assets SHA-256
+`dc15f362a44ca66c5b709b339efed04e44130c2bbf76c5a2dd57338d460be8b1`,
+and acknowledged the shared-assets/protected-file audit exception. Immediately
+before the write, both approved files were rehashed, the live ESP32-S3 and 16 MB
+flash were identified, the live partition table matched the reviewed table
+byte-for-byte, and OTA metadata reported sequence 1/state VALID with `ota_0`
+active.
+
+The complete pre-write assets partition was read into the permissions-restricted
+recovery file
+`firmware-review/6f07e1f6-english-wake-review/live-preflash-backup-20260810/live-assets-mandarin.bin`.
+It is 8,388,608 bytes with SHA-256
+`4d6d194a8482f8fc49b5b5c5857a44fe5a5b08059b0ecde361860e7fe8601138`.
+The accompanying live partition-table SHA-256 is
+`ce40cfe75056ef74bc052942f8a9ee3dce8e5e14ba17a6f63685a8fa0d11a23d`.
+
+Esptool 5.1.0 wrote only `generated_assets.bin` at `0x800000`; its erase range
+was `0x800000` through `0xfa0fff`, entirely within the assets partition. The
+tool padded the 7,996,242-byte source with two erased-value bytes for word
+alignment, reported its write-time data hash valid, and a separate
+`verify-flash` pass reported a matching digest. It did not write the
+application slots, bootloader, partition table, OTA metadata, NVS, or PHY
+regions.
+
+Post-reset UART confirms retained Wi-Fi, successful Symbios gateway bootstrap,
+activation, `ota_0`, idle state, display initialization, mono MIC1 input, and
+successful assets loading. WakeNet explicitly reports model `wn9_hiesp`, the
+`Hi,ESP` WakeNet9 configuration, a one-microphone AFE pipeline, and live input
+levels. Physical hands-free “Hi ESP” recognition and the retained manual DOWN
+fallback remain the final user acceptance tests.

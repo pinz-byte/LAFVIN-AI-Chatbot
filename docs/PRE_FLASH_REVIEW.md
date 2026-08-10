@@ -642,3 +642,20 @@ the exact proposed assets SHA-256 is
 Full provenance, comparison, risks, and review checklist are in
 `docs/LAFVIN_ENGLISH_WAKE_REVIEW.md`. No serial port was opened and nothing was
 flashed.
+
+The user then explicitly approved both reviewed hashes and acknowledged the
+shared-assets/protected-file audit exception. The live ESP32-S3, 16 MB flash,
+partition table, and active VALID `ota_0` state were revalidated. A complete
+permissions-restricted read-back of the installed 8 MB assets partition was
+retained with SHA-256
+`4d6d194a8482f8fc49b5b5c5857a44fe5a5b08059b0ecde361860e7fe8601138`.
+
+Only the approved assets image was written at `0x800000`. Esptool 5.1.0 erased
+`0x800000` through `0xfa0fff`, verified the write-time data hash, and a separate
+`verify-flash` pass reported a matching digest. No application, bootloader,
+partition-table, OTA-metadata, NVS, or PHY region was written. Post-reset UART
+confirms retained Wi-Fi and Symbios activation, display initialization, idle
+state, mono MIC1 audio, successful `srmodels` loading, and WakeNet model
+`wn9_hiesp` in a one-microphone AFE pipeline. Physical hands-free “Hi ESP”
+recognition and the retained manual DOWN fallback remain pending user
+acceptance.
