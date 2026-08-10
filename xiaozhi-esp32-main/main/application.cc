@@ -692,7 +692,11 @@ void Application::Alert(const char* status, const char* message, const char* emo
 void Application::DismissAlert() {
     if (GetDeviceState() == kDeviceStateIdle) {
         auto display = Board::GetInstance().GetDisplay();
+#if CONFIG_SYMBIOS_VOICE_GATEWAY
+        display->SetStatus("SYMBIOS");
+#else
         display->SetStatus(Lang::Strings::STANDBY);
+#endif
         display->SetEmotion("neutral");
         display->SetChatMessage("system", "");
     }
