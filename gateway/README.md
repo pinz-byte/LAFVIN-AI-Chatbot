@@ -46,6 +46,24 @@ broker accounts through parallel paths.
 TLS is mandatory in production. The gateway intentionally has no permissive
 or anonymous voice mode.
 
+## Read-only APEX terminal feed
+
+`PUT /api/v1/apex/snapshot` accepts a maximum 4 KiB allow-listed portfolio
+summary using a dedicated server-side `SYMBIOS_APEX_INGEST_TOKEN`. The gateway
+keeps only the newest sanitized snapshot in an isolated SQLite table or
+Firestore collection. Replayed or older snapshots are rejected.
+
+`GET /api/v1/terminal/feed` requires the enrolled device's existing `Device`
+credential. It adds a server-fetched public Coinbase `BTC-USD` quote and labels
+the APEX data `LIVE`, `DELAYED`, `STALE`, or `OFFLINE` from its direct source
+timestamp. Account identifiers, quantities, cost basis, thesis text, broker
+credentials, and the ingest token are never accepted by the terminal contract.
+Coinbase failure leaves the APEX feed available with `btc: null`.
+
+The APEX exporter and gateway ingest are disabled until the dedicated token and
+HTTPS URL are configured on their respective servers. These settings are not
+returned by bootstrap and must not be compiled into firmware.
+
 ## Production deployment
 
 The reviewed deployment is Cloud Run revision

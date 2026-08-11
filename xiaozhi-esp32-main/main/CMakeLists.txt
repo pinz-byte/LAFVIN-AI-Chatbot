@@ -41,6 +41,10 @@ set(SOURCES "audio/audio_codec.cc"
 
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "audio/demuxer" "protocols")
 
+if(CONFIG_SYMBIOS_TERMINAL_TICKER)
+    list(APPEND SOURCES "terminal_feed.cc")
+endif()
+
 # Add board common files
 list(APPEND SOURCES
     "boards/common/board.cc"

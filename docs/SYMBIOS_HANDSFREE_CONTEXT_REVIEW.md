@@ -162,3 +162,31 @@ environment binding. Therefore the project-awareness code has not been
 deployed or enabled. The device would continue to lack project access until a
 server-side bearer is provisioned and a zero-traffic gateway revision passes
 authenticated warm/cold query tests.
+
+## Application-only flash result — 2026-08-10
+
+The user explicitly approved application SHA-256
+`abf5e60857fbc68e5f6e51b66e4c4a3cb73d606b47bed8e2ca8928ab9b105410`
+at `0x20000`, directed that assets remain untouched, and acknowledged the
+protected-file and factory-smoke audit exception.
+
+Preflight revalidated an ESP32-S3 revision 0.2 with 8 MB PSRAM and 16 MB
+flash. The live partition table was byte-identical to the reviewed table
+(SHA-256 `ce40cfe75056ef74bc052942f8a9ee3dce8e5e14ba17a6f63685a8fa0d11a23d`).
+OTA metadata selected VALID `ota_0` at `0x20000` with a correct CRC. Fresh,
+permissions-restricted partition-table and OTA-metadata readbacks were retained;
+the exact prior mono-microphone application remains available as the rollback
+artifact.
+
+The first write session was interrupted before completion, which temporarily
+left the display black because `ota_0` contained only a partial application.
+Recovery rewrote the same approved application, and only that application, to
+completion. Esptool reported 2,822,800 bytes written, verified its data hash,
+and an independent `verify-flash` pass reported a matching digest. No assets,
+NVS, OTA metadata, PHY data, bootloader, or partition-table region was written.
+
+Post-reset UART confirms application 2.2.4, the expected Symbios board SKU,
+LCD initialization, gateway TLS connection, activation completion, VALID
+`ota_0`, English `wn9_hiesp`, and the one-microphone AFE pipeline. No panic or
+rollback was observed. Physical hands-free silence endpointing remains a user
+acceptance test.

@@ -704,3 +704,45 @@ eligible to be written. If separately approved later, only the exact
 2,822,800-byte application at `0x20000` may be considered. The pre-flash audit
 remains BLOCKED on inherited protected audio/board changes and the absent
 factory smoke acknowledgement. No device connection or flash occurred.
+
+## SYMBIOS hands-free application flash — 2026-08-10
+
+The user explicitly approved application SHA-256
+`abf5e60857fbc68e5f6e51b66e4c4a3cb73d606b47bed8e2ca8928ab9b105410`
+at `0x20000`, required that assets not be written, and acknowledged the
+protected-file and factory-smoke audit exception.
+
+The live target revalidated as ESP32-S3 revision 0.2, 8 MB PSRAM, and 16 MB
+flash. The live and reviewed partition tables matched byte-for-byte at SHA-256
+`ce40cfe75056ef74bc052942f8a9ee3dce8e5e14ba17a6f63685a8fa0d11a23d`.
+OTA metadata selected VALID `ota_0` at `0x20000` and its sequence CRC matched.
+Fresh permissions-restricted partition-table and OTA readbacks were retained;
+the exact prior mono-microphone application is retained for rollback.
+
+An interrupted first write temporarily left `ota_0` incomplete and the display
+black. The recovery pass wrote the same approved 2,822,800-byte application to
+`0x20000`, completed successfully, and verified the on-device data hash. A
+separate `verify-flash` command also reported a matching digest. The write did
+not touch assets, NVS, OTA metadata, PHY data, bootloader, or partition table.
+
+Post-reset serial evidence confirms application 2.2.4, LCD initialization,
+Symbios gateway connection, activation completion, VALID `ota_0`, English
+`wn9_hiesp`, and the one-microphone AFE pipeline without panic or rollback.
+Physical hands-free endpointing remains pending user acceptance.
+
+## APEX ticker application candidate — review stop
+
+The read-only APEX/market ticker candidate compiled and linked successfully in
+the pinned ESP-IDF 5.5.2 container. Its 2,830,704-byte application image has
+SHA-256
+`630a8ab34c2183df9b08f2f4001a9366f1bd29c6a4d63dd72cb1babfa4641216`.
+Esptool reports ESP32-S3, DIO, 80 MHz, 16 MB flash, a valid checksum and digest,
+and 31% application-partition headroom.
+
+No gateway or APEX deployment occurred and the candidate was not flashed. The
+pre-flash audit remains blocked on protected display/audio paths and a new
+physical smoke acknowledgement. Its source scan was corrected to exclude
+ignored generated build files without weakening either physical gate. If a
+later review authorizes flashing, only this exact application at `0x20000` is
+eligible; assets and all other regions remain out of scope. Full details are in
+`docs/SYMBIOS_TERMINAL_TICKER_REVIEW.md`.

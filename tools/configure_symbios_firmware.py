@@ -27,6 +27,11 @@ def validate_gateway_url(value: str) -> str:
     return value
 
 
+def terminal_feed_url(gateway_url: str) -> str:
+    parsed = urlparse(gateway_url)
+    return f"{parsed.scheme}://{parsed.netloc}/api/v1/terminal/feed"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gateway-url", required=True, type=validate_gateway_url)
@@ -50,6 +55,8 @@ def main() -> int:
         "CONFIG_SR_WN_WN9_HIESP=y",
         "CONFIG_SYMBIOS_VOICE_GATEWAY=y",
         "CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE=y",
+        "CONFIG_SYMBIOS_TERMINAL_TICKER=y",
+        f'CONFIG_SYMBIOS_TERMINAL_FEED_URL="{terminal_feed_url(args.gateway_url)}"',
         f'CONFIG_SYMBIOS_GATEWAY_URL="{args.gateway_url}"',
     ]
     if args.lafvin_audio_diagnostic:

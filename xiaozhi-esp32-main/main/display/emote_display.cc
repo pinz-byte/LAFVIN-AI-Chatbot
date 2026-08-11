@@ -159,6 +159,13 @@ void EmoteDisplay::SetChatMessage(const char* const role, const char* const cont
     }
 }
 
+void EmoteDisplay::SetTerminalTicker(const char* const content)
+{
+    if (emote_handle_ && content && strlen(content) > 0) {
+        emote_set_event_msg(emote_handle_, EMOTE_MGR_EVT_SYS, content);
+    }
+}
+
 void EmoteDisplay::SetStatus(const char* const status)
 {
     ESP_LOGI(TAG, "SetStatus: %s", status);

@@ -39,6 +39,22 @@ def git_changed_files() -> list[str]:
     return [line for line in completed.stdout.splitlines() if line]
 
 
+def git_audited_files() -> list[Path]:
+    """Return tracked and non-ignored untracked source paths.
+
+    Generated build output is intentionally excluded: calling it a possible
+    *committed* secret is both noisy and inaccurate. Untracked review source is
+    retained so the gate still catches a secret before its first commit.
+    """
+    completed = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    return [ROOT / item.decode() for item in completed.stdout.split(b"\0") if item]
+
+
 def main() -> int:
     failures: list[str] = []
     changed = git_changed_files()
@@ -79,7 +95,7 @@ def main() -> int:
     if not (ROOT / "factory-smoke-test.ok").exists():
         failures.append("factory display/wake/audio smoke test has not been acknowledged")
 
-    for path in ROOT.rglob("*"):
+    for path in git_audited_files():
         if (
             not path.is_file()
             or ".git" in path.parts
@@ -90,11 +106,11 @@ def main() -> int:
             continue
         try:
             text = path.read_text()
-        except UnicodeDecodeError:
+        except (OSError, UnicodeDecodeError):
             continue
         for pattern in SECRET_PATTERNS:
             if pattern.search(text):
-                failures.append(f"possible committed secret in {path.relative_to(ROOT)}")
+                failures.append(f"possible source secret in {path.relative_to(ROOT)}")
                 break
 
     if failures:

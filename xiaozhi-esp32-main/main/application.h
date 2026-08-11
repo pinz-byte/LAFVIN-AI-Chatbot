@@ -17,6 +17,10 @@
 #include "device_state.h"
 #include "device_state_machine.h"
 
+#if CONFIG_SYMBIOS_TERMINAL_TICKER
+#include "terminal_feed.h"
+#endif
+
 // Main event bits
 #define MAIN_EVENT_SCHEDULE             (1 << 0)
 #define MAIN_EVENT_SEND_AUDIO           (1 << 1)
@@ -141,6 +145,9 @@ private:
     std::string last_error_message_;
     AudioService audio_service_;
     std::unique_ptr<Ota> ota_;
+#if CONFIG_SYMBIOS_TERMINAL_TICKER
+    std::unique_ptr<TerminalFeed> terminal_feed_;
+#endif
 
     bool has_server_time_ = false;
     bool aborted_ = false;

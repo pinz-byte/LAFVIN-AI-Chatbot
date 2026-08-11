@@ -48,6 +48,12 @@ class Store(Protocol):
         now: int | None = None,
     ) -> str | None: ...
 
+    def save_terminal_snapshot(
+        self, payload_json: str, *, source_at: int, received_at: int
+    ) -> bool: ...
+
+    def load_terminal_snapshot(self) -> str | None: ...
+
 
 class GatewayStore:
     def __init__(self, path: Path) -> None:
@@ -75,6 +81,12 @@ class GatewayStore:
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
                     PRIMARY KEY (device_id, client_id)
+                );
+                CREATE TABLE IF NOT EXISTS terminal_snapshot (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    payload_json TEXT NOT NULL,
+                    source_at INTEGER NOT NULL,
+                    received_at INTEGER NOT NULL
                 );
                 """
             )
@@ -195,6 +207,32 @@ class GatewayStore:
             )
         return token
 
+    def save_terminal_snapshot(
+        self, payload_json: str, *, source_at: int, received_at: int
+    ) -> bool:
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO terminal_snapshot
+                    (singleton, payload_json, source_at, received_at)
+                VALUES (1, ?, ?, ?)
+                ON CONFLICT(singleton) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    source_at = excluded.source_at,
+                    received_at = excluded.received_at
+                WHERE terminal_snapshot.source_at < excluded.source_at
+                """,
+                (payload_json, source_at, received_at),
+            )
+        return cursor.rowcount == 1
+
+    def load_terminal_snapshot(self) -> str | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT payload_json FROM terminal_snapshot WHERE singleton = 1"
+            ).fetchone()
+        return None if row is None else str(row["payload_json"])
+
     @staticmethod
     def _to_enrollment(row: sqlite3.Row | dict[str, object]) -> Enrollment:
         return Enrollment(
@@ -218,6 +256,7 @@ class FirestoreGatewayStore:
         self._enrollments = self._client.collection("symbios_gateway_enrollments")
         self._codes = self._client.collection("symbios_gateway_activation_codes")
         self._devices = self._client.collection("symbios_gateway_devices")
+        self._terminal = self._client.collection("symbios_gateway_terminal_feed")
 
     @staticmethod
     def _device_key(device_id: str, client_id: str) -> str:
@@ -378,3 +417,36 @@ class FirestoreGatewayStore:
             return True
 
         return token if activate(transaction) else None
+
+    def save_terminal_snapshot(
+        self, payload_json: str, *, source_at: int, received_at: int
+    ) -> bool:
+        snapshot_ref = self._terminal.document("latest")
+        transaction = self._client.transaction()
+
+        @self._firestore.transactional
+        def save(transaction):
+            existing = snapshot_ref.get(transaction=transaction)
+            if existing.exists:
+                data = existing.to_dict() or {}
+                if int(data.get("source_at", 0)) >= source_at:
+                    return False
+            transaction.set(
+                snapshot_ref,
+                {
+                    "payload_json": payload_json,
+                    "source_at": source_at,
+                    "received_at": received_at,
+                },
+            )
+            return True
+
+        return bool(save(transaction))
+
+    def load_terminal_snapshot(self) -> str | None:
+        snapshot = self._terminal.document("latest").get()
+        if not snapshot.exists:
+            return None
+        data = snapshot.to_dict() or {}
+        payload = data.get("payload_json")
+        return payload if isinstance(payload, str) else None

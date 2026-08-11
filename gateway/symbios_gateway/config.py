@@ -40,6 +40,9 @@ class GatewaySettings:
     context_base_url: str | None = None
     context_token: str | None = field(default=None, repr=False)
     context_timeout_seconds: float = 12.0
+    apex_ingest_token: str | None = field(default=None, repr=False)
+    coinbase_base_url: str = "https://api.exchange.coinbase.com"
+    market_timeout_seconds: float = 4.0
     session_ttl_seconds: int = 300
     activation_ttl_seconds: int = 600
     allow_insecure_urls: bool = False
@@ -80,6 +83,13 @@ class GatewaySettings:
             context = urlparse(self.context_base_url)
             if context.scheme not in expected_http or not context.netloc:
                 raise ValueError("SYMBIOS_CONTEXT_BASE_URL must be a valid HTTPS URL")
+        if self.apex_ingest_token is not None and len(self.apex_ingest_token) < 32:
+            raise ValueError("SYMBIOS_APEX_INGEST_TOKEN must contain at least 32 characters")
+        coinbase = urlparse(self.coinbase_base_url)
+        if coinbase.scheme not in expected_http or not coinbase.netloc:
+            raise ValueError("SYMBIOS_COINBASE_BASE_URL must be a valid HTTPS URL")
+        if not 1.0 <= self.market_timeout_seconds <= 15.0:
+            raise ValueError("market timeout must be between 1 and 15 seconds")
         if self.store_backend not in {"sqlite", "firestore"}:
             raise ValueError("SYMBIOS_STORE_BACKEND must be sqlite or firestore")
         if self.store_backend == "firestore" and not self.gcp_project:
@@ -136,6 +146,13 @@ class GatewaySettings:
             context_timeout_seconds=float(
                 os.environ.get("SYMBIOS_CONTEXT_TIMEOUT_SECONDS", "12.0")
             ),
+            apex_ingest_token=os.environ.get("SYMBIOS_APEX_INGEST_TOKEN", "").strip() or None,
+            coinbase_base_url=os.environ.get(
+                "SYMBIOS_COINBASE_BASE_URL", "https://api.exchange.coinbase.com"
+            ).rstrip("/"),
+            market_timeout_seconds=float(
+                os.environ.get("SYMBIOS_MARKET_TIMEOUT_SECONDS", "4.0")
+            ),
             database_path=Path(os.environ.get("SYMBIOS_DB_PATH", "/data/symbios-gateway.sqlite3")),
             session_ttl_seconds=int(os.environ.get("SYMBIOS_SESSION_TTL_SECONDS", "300")),
             activation_ttl_seconds=int(os.environ.get("SYMBIOS_ACTIVATION_TTL_SECONDS", "600")),
@@ -153,3 +170,7 @@ class GatewaySettings:
     @property
     def context_enabled(self) -> bool:
         return bool(self.context_base_url and self.context_token)
+
+    @property
+    def apex_ingest_enabled(self) -> bool:
+        return self.apex_ingest_token is not None

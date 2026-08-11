@@ -17,6 +17,8 @@
                 "CONFIG_SR_WN_WN9_HIESP=y",
                 "CONFIG_SYMBIOS_VOICE_GATEWAY=y",
                 "CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE=y",
+                "CONFIG_SYMBIOS_TERMINAL_TICKER=y",
+                "CONFIG_SYMBIOS_TERMINAL_FEED_URL=\"https://symbios-gateway.invalid/api/v1/terminal/feed\"",
                 "CONFIG_SYMBIOS_GATEWAY_URL=\"https://symbios-gateway.invalid/xiaozhi/ota/\""
             ]
         }

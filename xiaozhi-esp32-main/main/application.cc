@@ -61,6 +61,11 @@ Application::Application() {
 }
 
 Application::~Application() {
+#if CONFIG_SYMBIOS_TERMINAL_TICKER
+    if (terminal_feed_) {
+        terminal_feed_->Stop();
+    }
+#endif
 #if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
     if (auto_submit_timer_handle_ != nullptr) {
         esp_timer_stop(auto_submit_timer_handle_);
@@ -343,6 +348,13 @@ void Application::HandleActivationDoneEvent() {
     ota_.reset();
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+
+#if CONFIG_SYMBIOS_TERMINAL_TICKER
+    if (!terminal_feed_) {
+        terminal_feed_ = std::make_unique<TerminalFeed>();
+        terminal_feed_->Start();
+    }
+#endif
 
     Schedule([this]() {
         // Play the success sound to indicate the device is ready

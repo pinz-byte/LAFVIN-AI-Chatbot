@@ -7,13 +7,16 @@ import logging
 import re
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
-from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, status
 from websockets.asyncio.client import connect as connect_websocket
 from websockets.exceptions import ConnectionClosed
 
 from .config import GatewaySettings
+from .apex_feed import ApexFeedError, build_terminal_feed, parse_apex_snapshot
 from .loopback import RamLoopbackBridgeError, run_ram_loopback_bridge
+from .market import CoinbaseMarketClient, MarketDataError
 from .realtime import RealtimeBridgeError, run_openai_realtime_bridge
 from .security import TokenError, issue_session_token, verify_session_token
 from .storage import FirestoreGatewayStore, GatewayStore, Store
@@ -57,9 +60,16 @@ def _create_store(settings: GatewaySettings) -> Store:
     return GatewayStore(settings.database_path)
 
 
-def create_app(settings: GatewaySettings | None = None, store: Store | None = None) -> FastAPI:
+def create_app(
+    settings: GatewaySettings | None = None,
+    store: Store | None = None,
+    market_client: CoinbaseMarketClient | None = None,
+) -> FastAPI:
     settings = settings or GatewaySettings.from_env()
     store = store or _create_store(settings)
+    market_client = market_client or CoinbaseMarketClient(
+        settings.coinbase_base_url, settings.market_timeout_seconds
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -75,6 +85,57 @@ def create_app(settings: GatewaySettings | None = None, store: Store | None = No
     @app.get("/healthz")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.put("/api/v1/apex/snapshot", status_code=status.HTTP_202_ACCEPTED)
+    async def ingest_apex_snapshot(
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, object]:
+        if not settings.apex_ingest_enabled:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "APEX ingest is disabled")
+        credential = _bearer_credential(authorization)
+        assert settings.apex_ingest_token is not None
+        if credential is None or not hmac.compare_digest(
+            credential, settings.apex_ingest_token
+        ):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid ingest credential")
+        body = await request.body()
+        if len(body) > 4096:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "feed too large")
+        received = datetime.now(timezone.utc)
+        try:
+            snapshot, source_at = parse_apex_snapshot(body, now=received)
+        except ApexFeedError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+        snapshot["received_at"] = received.isoformat()
+        encoded = json.dumps(snapshot, allow_nan=False, separators=(",", ":"))
+        if not store.save_terminal_snapshot(
+            encoded,
+            source_at=source_at,
+            received_at=int(received.timestamp()),
+        ):
+            raise HTTPException(status.HTTP_409_CONFLICT, "snapshot is not newer")
+        return {"accepted": True, "generated_at": snapshot["generated_at"]}
+
+    @app.get("/api/v1/terminal/feed")
+    async def terminal_feed(
+        response: Response,
+        authorization: str | None = Header(default=None),
+        device_id_header: str | None = Header(default=None, alias="Device-Id"),
+        client_id_header: str | None = Header(default=None, alias="Client-Id"),
+    ) -> dict[str, object]:
+        device_id = _identifier(device_id_header, "Device-Id")
+        client_id = _identifier(client_id_header, "Client-Id")
+        credential = _device_credential(authorization)
+        if credential is None or not store.authenticate(device_id, client_id, credential):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid device credential")
+        btc = None
+        try:
+            btc = await market_client.get_btc()
+        except (MarketDataError, OSError):
+            logger.warning("BTC terminal quote unavailable")
+        response.headers["Cache-Control"] = "no-store"
+        return build_terminal_feed(store.load_terminal_snapshot(), btc=btc)
 
     @app.post("/xiaozhi/ota/")
     async def bootstrap(

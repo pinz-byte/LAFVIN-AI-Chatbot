@@ -24,6 +24,35 @@ config SYMBIOS_GATEWAY_URL
         Replace the .invalid review placeholder at build time. Do not put API
         keys or shared provider credentials in this value.
 
+config SYMBIOS_TERMINAL_TICKER
+    bool "Show authenticated APEX/market ticker while idle"
+    depends on SYMBIOS_VOICE_GATEWAY && BOARD_TYPE_LAFVIN_AICHATBOT
+    default n
+    help
+        Fetch a bounded read-only market summary with the existing enrolled
+        device credential and rotate it only while the terminal is idle.
+        Listening, speaking, activation, and error screens always take priority.
+
+config SYMBIOS_TERMINAL_FEED_URL
+    string "Symbios terminal feed URL"
+    depends on SYMBIOS_TERMINAL_TICKER
+    default "https://symbios-gateway.invalid/api/v1/terminal/feed"
+    help
+        Public HTTPS gateway endpoint. This value is not a credential. Provider,
+        APEX ingest, broker, and cloud secrets must remain server-side.
+
+config SYMBIOS_TICKER_REFRESH_SECONDS
+    int "Terminal market refresh interval (seconds)"
+    depends on SYMBIOS_TERMINAL_TICKER
+    range 30 900
+    default 60
+
+config SYMBIOS_TICKER_PAGE_SECONDS
+    int "Terminal ticker page interval (seconds)"
+    depends on SYMBIOS_TERMINAL_TICKER
+    range 5 30
+    default 8
+
 config LAFVIN_AUDIO_DIAGNOSTIC
     bool "Enable local-only LAFVIN microphone diagnostics"
     depends on BOARD_TYPE_LAFVIN_AICHATBOT
