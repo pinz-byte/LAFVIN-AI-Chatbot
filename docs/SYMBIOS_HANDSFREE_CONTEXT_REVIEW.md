@@ -1,7 +1,8 @@
 # SYMBIOS hands-free, context, wake, and display review
 
-Status: staged source changes only. No gateway deployment, firmware build
-approval, device connection, or flash is authorized by this document.
+Status: source commit `16291a1813e7e6e6b4a81924dceaeb236d479855`
+and its endpoint-injected firmware artifact are staged for review. No gateway
+deployment, device connection, or flash is authorized by this document.
 
 ## Outcome staged in source
 
@@ -116,3 +117,48 @@ user has not yet selected the public asset list or quote source.
 
 No flash may occur until the exact merged/application hashes and protected-file
 audit exceptions are presented for a separate explicit approval.
+
+## Build and binary evidence — 2026-08-10
+
+GitHub Actions run
+[`31443784848`](https://github.com/pinz-byte/LAFVIN-AI-Chatbot/actions/runs/31443784848)
+passed the gateway suite, stock LAFVIN ESP-IDF 5.5.2 build, Symbios ESP-IDF
+5.5.2 build, and endpoint-injected review build. The downloaded builder
+manifest matches local re-hashing and the merged image inside the release ZIP.
+
+- merged image: 16,384,850 bytes, SHA-256
+  `5fac3987ba1abbc3cc17f33f982b48617ce921d22d3790bd3da40761e284ed30`;
+- application image: 2,822,800 bytes, SHA-256
+  `abf5e60857fbc68e5f6e51b66e4c4a3cb73d606b47bed8e2ca8928ab9b105410`;
+- release ZIP: SHA-256
+  `949c308569026cc291fbd76431a2d52800e87c6e40ce2d76ae9ba9af1fadbe63`;
+- regenerated assets image: 7,996,242 bytes, SHA-256
+  `4dfb919df4b826a98667ed44330ad3773040ac1462b337f1163a9a8682b1fbac`.
+
+Esptool validates the application checksum and appended digest. It targets an
+ESP32-S3 with DIO, 80 MHz, 16 MB flash, reports ESP-IDF 5.5.2 and compile time
+`Aug 10 2026 23:51:40`, and has a partition table byte-identical to the live
+table backed up before the English wake-assets write.
+
+String inspection finds exactly one reviewed gateway endpoint, no `.invalid`
+endpoint, and exactly one each of the auto-submit, short-VAD guard, SYMBIOS
+identity, manual DOWN-submit, and `wn9_hiesp` markers. A matched-type binary
+scan finds no complete PEM private key and no common OpenAI-key, Google-key, or
+JWT shape.
+
+The regenerated assets image is **not eligible to be written**: its container
+hash differs from the already approved and installed English assets image, and
+this candidate requires no asset change. If the application is later approved,
+only the exact application image above at `0x20000` may be considered; NVS,
+OTA metadata, PHY data, bootloader, partition table, and assets stay untouched.
+
+The fail-closed pre-flash audit remains **BLOCKED** on the inherited protected
+LAFVIN/audio changes and missing factory display/wake/audio smoke
+acknowledgement. This is an expected review stop, not an authorization to
+override it.
+
+The Cloud Run service currently has no context-query bearer secret or context
+environment binding. Therefore the project-awareness code has not been
+deployed or enabled. The device would continue to lack project access until a
+server-side bearer is provisioned and a zero-traffic gateway revision passes
+authenticated warm/cold query tests.

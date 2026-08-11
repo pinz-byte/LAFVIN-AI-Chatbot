@@ -659,3 +659,48 @@ state, mono MIC1 audio, successful `srmodels` loading, and WakeNet model
 `wn9_hiesp` in a one-microphone AFE pipeline. Physical hands-free “Hi ESP”
 recognition and the retained manual DOWN fallback remain pending user
 acceptance.
+
+## SYMBIOS identity, hands-free endpointing, and context candidate
+
+Physical testing accepted the built-in “Hi ESP” wake model but showed that an
+automatic turn never ended until DOWN was pressed. Source tracing established
+that the firmware already sends `listen.start` with mode `auto`, while the
+Vertex bridge intentionally disables provider VAD and waits for the matching
+explicit stop boundary. The candidate uses the existing device AFE VAD to send
+that normal stop after at least 300 ms of speech and 1,200 ms of silence. Short
+wake/noise bursts do not arm it, and DOWN remains the manual fallback.
+
+The same candidate changes the idle label to `SYMBIOS` and adds two optional,
+read-only Vertex tools for the canonical Symbios Memory Bridge: operational
+brief and focused context search. Their bearer must be injected server-side;
+no context secret currently exists on the gateway, so this code is neither
+deployed nor enabled. Exact “Hi Symbios” wake remains blocked on a genuinely
+trained Espressif-compatible WakeNet model; this image truthfully retains
+`wn9_hiesp` (“Hi ESP”). APEX/market display cards remain design-only pending an
+authenticated read-only APEX export and a selected live quote source.
+
+Commit `16291a1813e7e6e6b4a81924dceaeb236d479855` passed GitHub Actions run
+`31443784848`: gateway tests, stock LAFVIN build, Symbios build, and the
+endpoint-injected ESP-IDF 5.5.2 review build all passed. Downloaded builder and
+local hashes match:
+
+- merged image SHA-256:
+  `5fac3987ba1abbc3cc17f33f982b48617ce921d22d3790bd3da40761e284ed30`;
+- application SHA-256:
+  `abf5e60857fbc68e5f6e51b66e4c4a3cb73d606b47bed8e2ca8928ab9b105410`;
+- release ZIP SHA-256:
+  `949c308569026cc291fbd76431a2d52800e87c6e40ce2d76ae9ba9af1fadbe63`.
+
+Esptool validates the application checksum and appended digest. Binary
+inspection finds the reviewed endpoint once, no placeholder endpoint, all
+expected hands-free/identity/manual-fallback markers, the `wn9_hiesp` asset
+marker, and no complete PEM private key or common API-key/JWT shape. The
+partition table is byte-identical to the live backup.
+
+The regenerated assets container has SHA-256
+`4dfb919df4b826a98667ed44330ad3773040ac1462b337f1163a9a8682b1fbac`,
+which differs from the installed approved English-assets container and is not
+eligible to be written. If separately approved later, only the exact
+2,822,800-byte application at `0x20000` may be considered. The pre-flash audit
+remains BLOCKED on inherited protected audio/board changes and the absent
+factory smoke acknowledgement. No device connection or flash occurred.
