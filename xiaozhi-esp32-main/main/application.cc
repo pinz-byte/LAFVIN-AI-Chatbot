@@ -370,6 +370,9 @@ void Application::HandleActivationDoneEvent() {
     std::string message = std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
     display->ShowNotification(message.c_str());
     display->SetChatMessage("system", "");
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    display->SetStatus("PORTFOLIO");
+#endif
 
     // Release OTA object after activation is complete
     ota_.reset();
@@ -383,10 +386,12 @@ void Application::HandleActivationDoneEvent() {
     }
 #endif
 
+#if !CONFIG_SYMBIOS_DISPLAY_ONLY
     Schedule([this]() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     });
+#endif
 }
 
 void Application::ActivationTask() {
@@ -546,7 +551,11 @@ void Application::InitializeProtocol() {
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
-#ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    ESP_LOGI(TAG, "Display-only mode: cloud voice protocol disabled");
+    protocol_.reset();
+    return;
+#elif defined(CONFIG_SYMBIOS_VOICE_GATEWAY)
     if (!ota_->HasWebsocketConfig()) {
         // Fail closed: the Symbios build must never fall back to cached or
         // factory MQTT credentials when bootstrap/authentication is missing.

@@ -23,6 +23,7 @@ class GatewaySettings:
     jwt_secret: str = field(repr=False)
     admin_token: str = field(repr=False)
     database_path: Path = Path("/data/symbios-gateway.sqlite3")
+    display_only: bool = False
     voice_provider: str = "vertex_live"
     store_backend: str = "sqlite"
     gcp_project: str | None = None
@@ -115,10 +116,22 @@ class GatewaySettings:
                 raise RuntimeError(f"missing required environment variable: {name}")
             return value
 
+        def boolean(name: str, default: bool = False) -> bool:
+            value = os.environ.get(name)
+            if value is None:
+                return default
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+            raise RuntimeError(f"{name} must be a boolean")
+
         return cls(
             public_base_url=required("SYMBIOS_PUBLIC_BASE_URL").rstrip("/"),
             jwt_secret=required("SYMBIOS_JWT_SECRET"),
             admin_token=required("SYMBIOS_ADMIN_TOKEN"),
+            display_only=boolean("SYMBIOS_DISPLAY_ONLY"),
             voice_provider=os.environ.get("SYMBIOS_VOICE_PROVIDER", "vertex_live").strip(),
             store_backend=os.environ.get("SYMBIOS_STORE_BACKEND", "sqlite").strip(),
             gcp_project=os.environ.get("SYMBIOS_GCP_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT") or None,

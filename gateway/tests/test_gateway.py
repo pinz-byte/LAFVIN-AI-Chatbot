@@ -116,6 +116,41 @@ def test_invalid_device_token_never_receives_websocket_credentials(settings: Gat
         assert "websocket" not in response.json()
 
 
+def test_display_only_keeps_enrollment_but_never_issues_voice_session(
+    settings: GatewaySettings,
+) -> None:
+    display_settings = replace(settings, display_only=True)
+    store = GatewayStore(display_settings.database_path)
+    with TestClient(create_app(display_settings, store)) as client:
+        activation = client.post("/xiaozhi/ota/", headers=DEVICE_HEADERS, json={}).json()[
+            "activation"
+        ]
+        assert client.post(
+            f"/admin/enroll/{activation['code']}",
+            headers={"Authorization": f"Bearer {display_settings.admin_token}"},
+        ).status_code == 200
+        activated = client.post(
+            "/xiaozhi/ota/activate",
+            headers=DEVICE_HEADERS,
+            json={"challenge": activation["challenge"]},
+        )
+        device_token = activated.json()["symbios"]["device_token"]
+
+        bootstrap = client.post(
+            "/xiaozhi/ota/",
+            headers={**DEVICE_HEADERS, "Authorization": f"Device {device_token}"},
+            json={},
+        )
+        assert bootstrap.status_code == 200
+        assert "server_time" in bootstrap.json()
+        assert "websocket" not in bootstrap.json()
+
+        with pytest.raises(WebSocketDisconnect) as disabled:
+            with client.websocket_connect("/xiaozhi/v1/"):
+                pass
+        assert disabled.value.code == 4404
+
+
 def test_session_tokens_expire() -> None:
     from symbios_gateway.security import issue_session_token
 

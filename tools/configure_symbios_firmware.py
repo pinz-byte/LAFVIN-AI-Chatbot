@@ -46,19 +46,37 @@ def main() -> int:
         action="store_true",
         help="enable RAM-only ES7210 slot capture and local raw/normalized playback",
     )
+    diagnostic_mode.add_argument(
+        "--display-only",
+        action="store_true",
+        help="disable cloud voice sessions and retain only the authenticated terminal feed",
+    )
     args = parser.parse_args()
 
     sdkconfig_append = [
-        "CONFIG_LAFVIN_MONO_MIC_INPUT=y",
         "CONFIG_LANGUAGE_EN_US=y",
         "CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=n",
         "CONFIG_SR_WN_WN9_HIESP=y",
         "CONFIG_SYMBIOS_VOICE_GATEWAY=y",
-        "CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE=y",
         "CONFIG_SYMBIOS_TERMINAL_TICKER=y",
         f'CONFIG_SYMBIOS_TERMINAL_FEED_URL="{terminal_feed_url(args.gateway_url)}"',
         f'CONFIG_SYMBIOS_GATEWAY_URL="{args.gateway_url}"',
     ]
+    if args.display_only:
+        sdkconfig_append.extend(
+            [
+                "CONFIG_SYMBIOS_DISPLAY_ONLY=y",
+                "CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE=n",
+                "CONFIG_LAFVIN_MONO_MIC_INPUT=n",
+            ]
+        )
+    else:
+        sdkconfig_append.extend(
+            [
+                "CONFIG_LAFVIN_MONO_MIC_INPUT=y",
+                "CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE=y",
+            ]
+        )
     if args.lafvin_audio_diagnostic:
         sdkconfig_append.append("CONFIG_LAFVIN_AUDIO_DIAGNOSTIC=y")
     if args.lafvin_slot_audition:

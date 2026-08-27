@@ -33,6 +33,15 @@ config SYMBIOS_TERMINAL_TICKER
         device credential and rotate it only while the terminal is idle.
         Listening, speaking, activation, and error screens always take priority.
 
+config SYMBIOS_DISPLAY_ONLY
+    bool "Disable all Symbios voice sessions and operate as a portfolio display only"
+    depends on SYMBIOS_VOICE_GATEWAY && SYMBIOS_TERMINAL_TICKER
+    default n
+    help
+        Keep authenticated enrollment and the bounded terminal feed, but never
+        create a device WebSocket protocol or contact a voice provider. Buttons
+        and wake words cannot open a cloud audio session in this mode.
+
 config SYMBIOS_TERMINAL_FEED_URL
     string "Symbios terminal feed URL"
     depends on SYMBIOS_TERMINAL_TICKER

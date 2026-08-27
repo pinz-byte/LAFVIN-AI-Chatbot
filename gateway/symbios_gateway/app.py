@@ -154,20 +154,23 @@ def create_app(
         client_id = _identifier(client_id_header, "Client-Id")
         credential = _device_credential(authorization)
         if credential and store.authenticate(device_id, client_id, credential):
+            response: dict[str, object] = {
+                "server_time": {"timestamp": int(time.time() * 1000), "timezone_offset": 0},
+            }
+            if settings.display_only:
+                return response
             token = issue_session_token(
                 settings.jwt_secret,
                 device_id=device_id,
                 client_id=client_id,
                 ttl_seconds=settings.session_ttl_seconds,
             )
-            return {
-                "server_time": {"timestamp": int(time.time() * 1000), "timezone_offset": 0},
-                "websocket": {
-                    "url": settings.websocket_url,
-                    "token": token,
-                    "version": 1,
-                },
+            response["websocket"] = {
+                "url": settings.websocket_url,
+                "token": token,
+                "version": 1,
             }
+            return response
 
         enrollment = store.get_or_create_enrollment(
             device_id,
@@ -229,6 +232,9 @@ def create_app(
 
     @app.websocket("/xiaozhi/v1/")
     async def voice_gateway(websocket: WebSocket) -> None:
+        if settings.display_only:
+            await websocket.close(code=4404, reason="display-only terminal")
+            return
         authorization = websocket.headers.get("authorization")
         token = _bearer_credential(authorization)
         if token is None:

@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      display_only:
+        description: Build the authenticated portfolio display with cloud voice disabled
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - codex/feat/symbios-voice-gateway
@@ -81,6 +86,7 @@ jobs:
           GATEWAY_URL: ${{ inputs.gateway_url }}
           LAFVIN_AUDIO_DIAGNOSTIC: ${{ inputs.lafvin_audio_diagnostic }}
           LAFVIN_SLOT_AUDITION: ${{ inputs.lafvin_slot_audition }}
+          DISPLAY_ONLY: ${{ inputs.display_only }}
         run: |
           . /opt/esp/idf/export.sh
           diagnostic_args=()
@@ -89,6 +95,9 @@ jobs:
           fi
           if [[ "$LAFVIN_SLOT_AUDITION" == "true" ]]; then
             diagnostic_args+=(--lafvin-slot-audition)
+          fi
+          if [[ "$DISPLAY_ONLY" == "true" ]]; then
+            diagnostic_args+=(--display-only)
           fi
           python3 ../tools/configure_symbios_firmware.py \
             --gateway-url "$GATEWAY_URL" \
