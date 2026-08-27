@@ -36,6 +36,7 @@
 #define MAIN_EVENT_STOP_LISTENING       (1 << 11)
 #define MAIN_EVENT_STATE_CHANGED        (1 << 12)
 #define MAIN_EVENT_AUTO_STOP_LISTENING  (1 << 13)
+#define MAIN_EVENT_SYMBIOS_IDLE_TIMEOUT (1 << 14)
 
 
 enum AecMode {
@@ -139,6 +140,9 @@ private:
     bool auto_submit_heard_speech_ = false;
     int64_t auto_submit_speech_started_us_ = 0;
 #endif
+#if CONFIG_SYMBIOS_VOICE_GATEWAY
+    esp_timer_handle_t symbios_idle_timer_handle_ = nullptr;
+#endif
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
     AecMode aec_mode_ = kAecOff;
@@ -170,6 +174,11 @@ private:
     void HandleVadChangeForAutoSubmit(bool speaking);
     void HandleAutoStopListeningEvent();
     void ResetAutoSubmitState();
+#endif
+#if CONFIG_SYMBIOS_VOICE_GATEWAY
+    void HandleSymbiosIdleTimeoutEvent();
+    void ArmSymbiosIdleTimer();
+    void StopSymbiosIdleTimer();
 #endif
     void ContinueOpenAudioChannel(ListeningMode mode);
     void ContinueWakeWordInvoke(const std::string& wake_word);

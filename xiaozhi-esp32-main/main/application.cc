@@ -58,6 +58,20 @@ Application::Application() {
     };
     ESP_ERROR_CHECK(esp_timer_create(&auto_submit_timer_args, &auto_submit_timer_handle_));
 #endif
+
+#if CONFIG_SYMBIOS_VOICE_GATEWAY
+    esp_timer_create_args_t symbios_idle_timer_args = {
+        .callback = [](void* arg) {
+            Application* app = static_cast<Application*>(arg);
+            xEventGroupSetBits(app->event_group_, MAIN_EVENT_SYMBIOS_IDLE_TIMEOUT);
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "symbios_idle",
+        .skip_unhandled_events = true
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&symbios_idle_timer_args, &symbios_idle_timer_handle_));
+#endif
 }
 
 Application::~Application() {
@@ -70,6 +84,12 @@ Application::~Application() {
     if (auto_submit_timer_handle_ != nullptr) {
         esp_timer_stop(auto_submit_timer_handle_);
         esp_timer_delete(auto_submit_timer_handle_);
+    }
+#endif
+#if CONFIG_SYMBIOS_VOICE_GATEWAY
+    if (symbios_idle_timer_handle_ != nullptr) {
+        esp_timer_stop(symbios_idle_timer_handle_);
+        esp_timer_delete(symbios_idle_timer_handle_);
     }
 #endif
     if (clock_timer_handle_ != nullptr) {
@@ -205,7 +225,8 @@ void Application::Run() {
         MAIN_EVENT_STOP_LISTENING |
         MAIN_EVENT_ACTIVATION_DONE |
         MAIN_EVENT_STATE_CHANGED |
-        MAIN_EVENT_AUTO_STOP_LISTENING;
+        MAIN_EVENT_AUTO_STOP_LISTENING |
+        MAIN_EVENT_SYMBIOS_IDLE_TIMEOUT;
 
     while (true) {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
@@ -268,6 +289,12 @@ void Application::Run() {
 #if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
         if (bits & MAIN_EVENT_AUTO_STOP_LISTENING) {
             HandleAutoStopListeningEvent();
+        }
+#endif
+
+#if CONFIG_SYMBIOS_VOICE_GATEWAY
+        if (bits & MAIN_EVENT_SYMBIOS_IDLE_TIMEOUT) {
+            HandleSymbiosIdleTimeoutEvent();
         }
 #endif
 
@@ -582,11 +609,19 @@ void Application::InitializeProtocol() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
+#if CONFIG_SYMBIOS_SINGLE_TURN
+                        ESP_LOGI(TAG, "Symbios response complete; closing on-demand audio channel");
+                        if (protocol_ && protocol_->IsAudioChannelOpened()) {
+                            protocol_->CloseAudioChannel();
+                        }
+                        SetDeviceState(kDeviceStateIdle);
+#else
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
                         } else {
                             SetDeviceState(kDeviceStateListening);
                         }
+#endif
                     }
                 });
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
@@ -894,6 +929,43 @@ void Application::HandleAutoStopListeningEvent() {
 }
 #endif
 
+#if CONFIG_SYMBIOS_VOICE_GATEWAY
+void Application::ArmSymbiosIdleTimer() {
+    if (symbios_idle_timer_handle_ == nullptr) {
+        return;
+    }
+    esp_timer_stop(symbios_idle_timer_handle_);
+    const uint64_t timeout_us =
+        static_cast<uint64_t>(CONFIG_SYMBIOS_LISTEN_IDLE_TIMEOUT_MS) * 1000ULL;
+    esp_err_t error = esp_timer_start_once(symbios_idle_timer_handle_, timeout_us);
+    if (error != ESP_OK) {
+        ESP_LOGW(TAG, "Unable to arm Symbios idle timer: %s", esp_err_to_name(error));
+    }
+}
+
+void Application::StopSymbiosIdleTimer() {
+    if (symbios_idle_timer_handle_ != nullptr) {
+        esp_timer_stop(symbios_idle_timer_handle_);
+    }
+}
+
+void Application::HandleSymbiosIdleTimeoutEvent() {
+    if (GetDeviceState() != kDeviceStateListening) {
+        return;
+    }
+    if (audio_service_.IsVoiceDetected()) {
+        ArmSymbiosIdleTimer();
+        return;
+    }
+
+    ESP_LOGI(TAG, "Symbios listen idle timeout; closing audio channel");
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
+        protocol_->CloseAudioChannel();
+    }
+    SetDeviceState(kDeviceStateIdle);
+}
+#endif
+
 void Application::HandleWakeWordDetectedEvent() {
     if (!protocol_) {
         return;
@@ -980,6 +1052,9 @@ void Application::HandleStateChangedEvent() {
 #if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
     ResetAutoSubmitState();
 #endif
+#if CONFIG_SYMBIOS_VOICE_GATEWAY
+    StopSymbiosIdleTimer();
+#endif
 
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
@@ -1034,6 +1109,9 @@ void Application::HandleStateChangedEvent() {
                 play_popup_on_listening_ = false;
                 audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
             }
+#if CONFIG_SYMBIOS_VOICE_GATEWAY
+            ArmSymbiosIdleTimer();
+#endif
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);

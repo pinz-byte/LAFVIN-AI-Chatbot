@@ -116,6 +116,24 @@ config SYMBIOS_AUTO_SUBMIT_MIN_SPEECH_MS
         local wake acknowledgement or a transient noise from becoming an empty
         voice turn.
 
+config SYMBIOS_SINGLE_TURN
+    bool "Close the Symbios WebSocket after each completed response"
+    depends on SYMBIOS_VOICE_GATEWAY
+    default y
+    help
+        End the cloud audio channel when TTS completes instead of returning to
+        continuous listening. A new channel is opened only by a button press or
+        wake word. This prevents an idle terminal from keeping Cloud Run active.
+
+config SYMBIOS_LISTEN_IDLE_TIMEOUT_MS
+    int "Maximum Symbios listen time without speech (ms)"
+    depends on SYMBIOS_VOICE_GATEWAY
+    range 5000 120000
+    default 30000
+    help
+        Close an on-demand audio channel when the terminal enters listening but
+        no voice is detected within this window. Active speech rearms the timer.
+
 choice
     prompt "Flash Assets"
     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE
