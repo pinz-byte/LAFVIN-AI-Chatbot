@@ -103,7 +103,7 @@ def test_parser_ignores_unknown_fields_and_rejects_oversize() -> None:
     assert "orders" not in text
 
     try:
-        parse_apex_snapshot(b"{" + b"x" * 4096 + b"}", now=now)
+        parse_apex_snapshot(b"{" + b"x" * 8192 + b"}", now=now)
     except ValueError as exc:
         assert "too large" in str(exc)
     else:
@@ -183,6 +183,190 @@ def test_offline_payload_has_no_fabricated_apex_values() -> None:
     assert feed["status"] == "OFFLINE"
     assert feed["apex"] is None
     assert feed["rows"] == []
+    assert feed["events"] == []
+
+
+def test_market_phase_is_allow_listed_for_close_and_weekend_rendering() -> None:
+    now = datetime(2026, 8, 15, 16, 0, tzinfo=timezone.utc)
+    source = payload(now)
+    source["schema_version"] = 2
+    source["apex"]["market_phase"] = "weekend"
+
+    normalized, _ = parse_apex_snapshot(json.dumps(source).encode(), now=now)
+
+    assert normalized["apex"]["market_phase"] == "weekend"
+
+
+def test_schema_two_events_are_prioritized_bounded_and_expiry_gated() -> None:
+    now = datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc)
+    source = payload(now)
+    source["schema_version"] = 2
+    source["sources"] = {
+        "council": {"status": "FRESH", "source_at": now.isoformat()},
+        "slack": {"status": "FRESH", "source_at": now.isoformat()},
+    }
+    source["events"] = [
+        {
+            "id": "brief:1",
+            "kind": "BRIEF",
+            "priority": 45,
+            "title": "Midday briefing",
+            "body": "Rates and breadth update.",
+            "source": "APEX SLACK",
+            "source_at": now.isoformat(),
+            "expires_at": (now + timedelta(hours=1)).isoformat(),
+            "freshness": "FRESH",
+        },
+        {
+            "id": "fill:1",
+            "kind": "TRADE",
+            "priority": 100,
+            "title": "BUY 10",
+            "body": "Broker-confirmed live fill.",
+            "symbol": "AAPL",
+            "value": 210.25,
+            "metric_label": "QTY",
+            "metric_value": "10",
+            "source": "LIVE BOOK",
+            "source_at": now.isoformat(),
+            "expires_at": (now + timedelta(hours=1)).isoformat(),
+            "freshness": "FRESH",
+        },
+        {
+            "id": "expired:1",
+            "kind": "INFO",
+            "priority": 30,
+            "title": "Expired",
+            "body": "Must not reach device.",
+            "source": "APEX",
+            "source_at": (now - timedelta(hours=2)).isoformat(),
+            "expires_at": (now - timedelta(hours=1)).isoformat(),
+            "freshness": "FRESH",
+        },
+    ]
+
+    normalized, _ = parse_apex_snapshot(json.dumps(source).encode(), now=now)
+
+    assert normalized["schema_version"] == 2
+    assert [event["id"] for event in normalized["events"]] == ["fill:1", "brief:1"]
+    assert normalized["events"][0]["source"] == "LIVE BOOK"
+    assert normalized["sources"]["council"]["status"] == "FRESH"
+
+
+def test_schema_two_rejects_unbounded_or_unknown_event() -> None:
+    now = datetime.now(timezone.utc)
+    source = payload(now)
+    source["schema_version"] = 2
+    source["events"] = [{
+        "id": "bad:1",
+        "kind": "BUY_NOW",
+        "priority": 101,
+        "title": "Bad",
+        "body": "Unknown event",
+        "source": "APEX",
+        "source_at": now.isoformat(),
+        "expires_at": (now + timedelta(hours=1)).isoformat(),
+    }]
+    try:
+        parse_apex_snapshot(json.dumps(source).encode(), now=now)
+    except ValueError as exc:
+        assert "events[0]" in str(exc)
+    else:
+        raise AssertionError("unknown event was accepted")
+
+
+def test_device_rotation_is_category_diverse_and_paper_fills_are_not_live_trades() -> None:
+    now = datetime(2026, 8, 12, 16, 0, tzinfo=timezone.utc)
+
+    def event(identity: str, kind: str, title: str, **extra: object) -> dict[str, object]:
+        return {
+            "id": identity,
+            "kind": kind,
+            "priority": int(extra.pop("priority", 70)),
+            "title": title,
+            "body": str(extra.pop("body", "Observed event.")),
+            "source": str(extra.pop("source", "APEX")),
+            "source_at": now.isoformat(),
+            "expires_at": (now + timedelta(minutes=10)).isoformat(),
+            "freshness": "FRESH",
+            **extra,
+        }
+
+    events = [
+        event(
+            f"paper:{index}",
+            "TRADE",
+            f"APEX MASTERS — Voice {index} filed: KTOS",
+            priority=100,
+            source="APEX SLACK",
+        )
+        for index in range(3)
+    ] + [
+        event("market:1", "BRIEF", "MARKET OPEN · 12:00 ET", source="APEX MARKET"),
+        event("up:1", "MOVER_UP", "TOP GAINER", symbol="NBIS", value=230.0, change_pct=23.5),
+        event("down:1", "MOVER_DOWN", "TOP LOSER", symbol="PLTR", value=170.0, change_pct=-4.0),
+        event("buy:1", "INFO", "BUY SIGNAL", symbol="NBIS", value=230.0, metric_label="SIGNAL", metric_value="BUY"),
+        event("sell:1", "INFO", "SELL SIGNAL", symbol="NVDA", value=225.0, metric_label="SIGNAL", metric_value="SELL"),
+    ]
+    stored = {
+        "schema_version": 2,
+        "generated_at": now.isoformat(),
+        "received_at": now.isoformat(),
+        "apex": {"source_at": now.isoformat()},
+        "rows": [],
+        "events": events,
+        "sources": {
+            "council": {"status": "FRESH", "source_at": now.isoformat()},
+            "slack": {"status": "FRESH", "source_at": now.isoformat()},
+        },
+    }
+
+    feed = build_terminal_feed(json.dumps(stored), btc=None, now=now)
+
+    assert [item["title"] for item in feed["events"]] == [
+        "MARKET OPEN · 12:00 ET", "SIGNAL BOARD", "MARKET MOVERS",
+        "APEX MASTERS — Voice 0 filed: KTOS",
+    ]
+    assert sum(item["kind"] == "COUNCIL" for item in feed["events"]) == 1
+    assert not any(item["kind"] == "TRADE" for item in feed["events"])
+    signal_board = next(item for item in feed["events"] if item["title"] == "SIGNAL BOARD")
+    assert signal_board["body"] == "BUY NBIS | SELL NVDA"
+
+
+def test_stale_feed_suppresses_actionable_events() -> None:
+    now = datetime(2026, 8, 12, 16, 0, tzinfo=timezone.utc)
+    generated = now - timedelta(minutes=11)
+    stored = {
+        "schema_version": 2,
+        "generated_at": generated.isoformat(),
+        "received_at": generated.isoformat(),
+        "apex": None,
+        "rows": [],
+        "events": [{
+            "id": "buy:stale",
+            "kind": "INFO",
+            "priority": 78,
+            "title": "BUY SIGNAL",
+            "body": "Must not appear as current.",
+            "source": "APEX SIGNAL",
+            "source_at": generated.isoformat(),
+            "expires_at": (now + timedelta(minutes=5)).isoformat(),
+            "freshness": "FRESH",
+            "symbol": "AAPL",
+            "value": 210.0,
+            "metric_label": "SIGNAL",
+            "metric_value": "BUY",
+        }],
+        "sources": {
+            "council": {"status": "STALE", "source_at": generated.isoformat()},
+            "slack": {"status": "STALE", "source_at": generated.isoformat()},
+        },
+    }
+
+    feed = build_terminal_feed(json.dumps(stored), btc=None, now=now)
+
+    assert feed["status"] == "STALE"
+    assert feed["events"] == []
 
 
 def test_apex_ingest_settings_are_all_or_nothing_and_redacted(tmp_path: Path) -> None:

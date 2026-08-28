@@ -3,14 +3,26 @@ from __future__ import annotations
 import json
 import math
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Mapping
 
+from .terminal_intention import MAX_INTENTIONS, select_terminal_intentions
 
-MAX_FEED_BYTES = 4096
-MAX_ROWS = 6
+
+MAX_FEED_BYTES = 8192
+MAX_ROWS = 12
+MAX_EVENTS = MAX_INTENTIONS
+MAX_DEVICE_CARDS = 15
+MAX_VISIBLE_ROWS = 4
 MAX_SOURCE_AGE_SECONDS = 24 * 60 * 60
 SYMBOL_PATTERN = re.compile(r"^[A-Z0-9.\-]{1,12}$")
+EVENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9:._\-]{1,40}$")
+EVENT_KINDS = {
+    "TRADE", "RISK", "COUNCIL", "OVERSOLD", "OVERBOUGHT",
+    "MOVER_UP", "MOVER_DOWN", "BRIEF", "INFO",
+}
+SOURCE_STATUSES = {"FRESH", "STALE", "MISSING", "PENDING"}
+MARKET_PHASES = {"premarket", "intraday", "eod", "closed", "weekend", "unknown"}
 
 
 class ApexFeedError(ValueError):
@@ -52,6 +64,109 @@ def _count(value: object, name: str) -> int:
     return value
 
 
+def _priority(value: object, name: str) -> int:
+    priority = _count(value, name)
+    if priority > 100:
+        raise ApexFeedError(f"invalid {name}")
+    return priority
+
+
+def _text(value: object, name: str, *, maximum: int, empty: bool = False) -> str:
+    if not isinstance(value, str) or len(value.encode("utf-8")) > maximum:
+        raise ApexFeedError(f"invalid {name}")
+    if not empty and not value.strip():
+        raise ApexFeedError(f"invalid {name}")
+    return value
+
+
+def _parse_sources(value: object) -> dict[str, object]:
+    if value is None:
+        return {
+            "council": {"status": "MISSING", "source_at": None},
+            "slack": {"status": "MISSING", "source_at": None},
+        }
+    if not isinstance(value, Mapping):
+        raise ApexFeedError("invalid sources")
+    output: dict[str, object] = {}
+    for name in ("council", "slack"):
+        source = value.get(name)
+        if not isinstance(source, Mapping) or source.get("status") not in SOURCE_STATUSES:
+            raise ApexFeedError(f"invalid sources.{name}")
+        source_at = source.get("source_at")
+        output[name] = {
+            "status": source["status"],
+            "source_at": (
+                _parse_timestamp(source_at, f"sources.{name}.source_at").isoformat()
+                if source_at is not None else None
+            ),
+        }
+    return output
+
+
+def _parse_events(
+    value: object,
+    *,
+    current: datetime,
+) -> list[dict[str, object]]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > MAX_EVENTS:
+        raise ApexFeedError("invalid events")
+    output: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(value):
+        if not isinstance(raw, Mapping):
+            raise ApexFeedError(f"invalid events[{index}]")
+        identity = raw.get("id")
+        kind = raw.get("kind")
+        if not isinstance(identity, str) or EVENT_ID_PATTERN.fullmatch(identity) is None:
+            raise ApexFeedError(f"invalid events[{index}].id")
+        if identity in seen or kind not in EVENT_KINDS:
+            raise ApexFeedError(f"invalid events[{index}]")
+        source_at = _parse_timestamp(raw.get("source_at"), f"events[{index}].source_at")
+        expires_at = _parse_timestamp(raw.get("expires_at"), f"events[{index}].expires_at")
+        if source_at > current + timedelta(seconds=60) or expires_at <= source_at:
+            raise ApexFeedError(f"invalid events[{index}].expires_at")
+        if expires_at <= current:
+            continue
+        event: dict[str, object] = {
+            "id": identity,
+            "kind": kind,
+            "priority": _priority(raw.get("priority"), f"events[{index}].priority"),
+            "title": _text(raw.get("title"), f"events[{index}].title", maximum=48),
+            "body": _text(
+                raw.get("body", ""), f"events[{index}].body", maximum=180, empty=True
+            ),
+            "source": _text(raw.get("source"), f"events[{index}].source", maximum=24),
+            "source_at": source_at.isoformat(),
+            "expires_at": expires_at.isoformat(),
+            "freshness": "FRESH",
+        }
+        symbol = raw.get("symbol")
+        if symbol is not None:
+            if not isinstance(symbol, str) or SYMBOL_PATTERN.fullmatch(symbol) is None:
+                raise ApexFeedError(f"invalid events[{index}].symbol")
+            event["symbol"] = symbol
+        for field in ("value", "change_pct"):
+            if field in raw:
+                event[field] = _number(raw.get(field), f"events[{index}].{field}", nullable=True)
+        metric_label = raw.get("metric_label")
+        metric_value = raw.get("metric_value")
+        if (metric_label is None) != (metric_value is None):
+            raise ApexFeedError(f"invalid events[{index}].metric")
+        if metric_label is not None:
+            event["metric_label"] = _text(
+                metric_label, f"events[{index}].metric_label", maximum=16
+            )
+            event["metric_value"] = _text(
+                metric_value, f"events[{index}].metric_value", maximum=24
+            )
+        output.append(event)
+        seen.add(identity)
+    output.sort(key=lambda item: (int(item["priority"]), str(item["source_at"])), reverse=True)
+    return output
+
+
 def parse_apex_snapshot(
     body: bytes,
     *,
@@ -63,8 +178,9 @@ def parse_apex_snapshot(
         source = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ApexFeedError("invalid JSON") from exc
-    if not isinstance(source, Mapping) or source.get("schema_version") != 1:
+    if not isinstance(source, Mapping) or source.get("schema_version") not in {1, 2}:
         raise ApexFeedError("unsupported schema version")
+    schema_version = int(source["schema_version"])
 
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     generated = _parse_timestamp(source.get("generated_at"), "generated_at")
@@ -110,16 +226,26 @@ def parse_apex_snapshot(
         seen.add(symbol)
 
     normalized: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": schema_version,
         "generated_at": generated.isoformat(),
         "apex": {
             "net_liq": _number(raw_apex.get("net_liq"), "apex.net_liq", nullable=True, minimum=0.0),
             "cash_pct": _number(raw_apex.get("cash_pct"), "apex.cash_pct", nullable=True),
+            "day_pl_total": _number(
+                raw_apex.get("day_pl_total"), "apex.day_pl_total", nullable=True
+            ) if "day_pl_total" in raw_apex else None,
+            "market_phase": (
+                raw_apex.get("market_phase", "unknown")
+                if raw_apex.get("market_phase", "unknown") in MARKET_PHASES
+                else "unknown"
+            ),
             "position_count": _count(raw_apex.get("position_count"), "apex.position_count"),
             "risk_count": _count(raw_apex.get("risk_count"), "apex.risk_count"),
             "source_at": apex_source.isoformat(),
         },
         "rows": rows,
+        "events": _parse_events(source.get("events"), current=current),
+        "sources": _parse_sources(source.get("sources")),
     }
     return normalized, int(generated.timestamp())
 
@@ -142,13 +268,18 @@ def build_terminal_feed(
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     if stored_json is None:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "generated_at": current.isoformat(),
             "received_at": current.isoformat(),
             "status": "OFFLINE",
             "btc": btc,
             "apex": None,
             "rows": [],
+            "events": [],
+            "sources": {
+                "council": {"status": "MISSING", "source_at": None},
+                "slack": {"status": "MISSING", "source_at": None},
+            },
         }
     try:
         stored = json.loads(stored_json)
@@ -156,12 +287,34 @@ def build_terminal_feed(
         received_at = _parse_timestamp(stored["received_at"], "received_at")
     except (ApexFeedError, KeyError, TypeError, json.JSONDecodeError) as exc:
         raise ApexFeedError("stored feed is invalid") from exc
-    return {
-        "schema_version": 1,
+    status = _freshness(generated, current)
+    feed = {
+        "schema_version": stored.get("schema_version", 1),
         "generated_at": generated.isoformat(),
         "received_at": received_at.isoformat(),
-        "status": _freshness(generated, current),
+        "status": status,
         "btc": btc,
         "apex": stored.get("apex"),
         "rows": stored.get("rows", []),
+        "events": (
+            select_terminal_intentions(stored.get("events", []), current=current)
+            if status != "STALE" else []
+        ),
+        "sources": stored.get("sources", _parse_sources(None)),
     }
+    # The device has fifteen physical slide slots. Events answer decision
+    # questions; portfolio and BTC each reserve one slot; the remainder carries
+    # distinct held/watch prices instead of silently truncating useful events.
+    reserved = (1 if feed["apex"] is not None else 0) + (1 if feed["btc"] is not None else 0)
+    row_budget = min(MAX_VISIBLE_ROWS, max(0, MAX_DEVICE_CARDS - len(feed["events"]) - reserved))
+    feed["rows"] = feed["rows"][:row_budget]
+    encoded = json.dumps(feed, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    while len(encoded) > MAX_FEED_BYTES and feed["rows"]:
+        feed["rows"].pop()
+        encoded = json.dumps(feed, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    while len(encoded) > MAX_FEED_BYTES and feed["events"]:
+        feed["events"].pop()
+        encoded = json.dumps(feed, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    if len(encoded) > MAX_FEED_BYTES:
+        raise ApexFeedError("terminal feed exceeds device bound")
+    return feed

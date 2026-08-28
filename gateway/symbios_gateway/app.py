@@ -100,7 +100,7 @@ def create_app(
         ):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid ingest credential")
         body = await request.body()
-        if len(body) > 4096:
+        if len(body) > 8192:
             raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "feed too large")
         received = datetime.now(timezone.utc)
         try:
