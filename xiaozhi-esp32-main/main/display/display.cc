@@ -45,6 +45,10 @@ void Display::SetChatMessage(const char* role, const char* content) {
     ESP_LOGW(TAG, "     %s", content);
 }
 
+void Display::SetTerminalCard(const TerminalCard& card) {
+    ESP_LOGD(TAG, "Terminal card: %s %s", card.title.c_str(), card.primary.c_str());
+}
+
 void Display::SetTerminalTicker(const char* content) {
     ESP_LOGD(TAG, "Terminal ticker: %s", content);
 }

@@ -36,7 +36,6 @@
 #define MAIN_EVENT_STOP_LISTENING       (1 << 11)
 #define MAIN_EVENT_STATE_CHANGED        (1 << 12)
 #define MAIN_EVENT_AUTO_STOP_LISTENING  (1 << 13)
-#define MAIN_EVENT_SYMBIOS_IDLE_TIMEOUT (1 << 14)
 
 
 enum AecMode {
@@ -70,7 +69,13 @@ public:
     void Run();
 
     DeviceState GetDeviceState() const { return state_machine_.GetState(); }
-    bool IsVoiceDetected() const { return audio_service_.IsVoiceDetected(); }
+    bool IsVoiceDetected() const {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+        return false;
+#else
+        return audio_service_.IsVoiceDetected();
+#endif
+    }
     
     /**
      * Request state transition
@@ -118,6 +123,11 @@ public:
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
+#if CONFIG_SYMBIOS_TERMINAL_TICKER
+    void NextTerminalCard();
+    void PreviousTerminalCard();
+    void RefreshTerminalFeed();
+#endif
     
     /**
      * Reset protocol resources (thread-safe)
@@ -140,9 +150,6 @@ private:
     bool auto_submit_heard_speech_ = false;
     int64_t auto_submit_speech_started_us_ = 0;
 #endif
-#if CONFIG_SYMBIOS_VOICE_GATEWAY
-    esp_timer_handle_t symbios_idle_timer_handle_ = nullptr;
-#endif
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
     AecMode aec_mode_ = kAecOff;
@@ -157,6 +164,7 @@ private:
     bool aborted_ = false;
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
+    bool display_bootstrap_started_ = false;
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
 
@@ -175,11 +183,6 @@ private:
     void HandleAutoStopListeningEvent();
     void ResetAutoSubmitState();
 #endif
-#if CONFIG_SYMBIOS_VOICE_GATEWAY
-    void HandleSymbiosIdleTimeoutEvent();
-    void ArmSymbiosIdleTimer();
-    void StopSymbiosIdleTimer();
-#endif
     void ContinueOpenAudioChannel(ListeningMode mode);
     void ContinueWakeWordInvoke(const std::string& wake_word);
 
@@ -189,6 +192,7 @@ private:
     // Helper methods
     void CheckAssetsVersion();
     void CheckNewVersion();
+    void CheckDisplayBootstrap();
     void InitializeProtocol();
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);

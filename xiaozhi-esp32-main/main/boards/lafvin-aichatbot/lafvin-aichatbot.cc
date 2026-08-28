@@ -76,7 +76,7 @@ public:
 
 class LichuangDevBoard : public WifiBoard {
 private:
-    i2c_master_bus_handle_t i2c_bus_;
+    i2c_master_bus_handle_t i2c_bus_ = nullptr;
     // i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
 #if CONFIG_SYMBIOS_VOICE_GATEWAY || CONFIG_LAFVIN_AUDIO_DIAGNOSTIC || CONFIG_LAFVIN_SLOT_AUDITION
@@ -160,6 +160,7 @@ private:
 
 
     void InitializeI2c() {
+#if !CONFIG_SYMBIOS_DISPLAY_ONLY
         // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
             .i2c_port = (i2c_port_t)1,
@@ -174,6 +175,9 @@ private:
             },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
+#else
+        ESP_LOGI(TAG, "Display-only mode: codec I2C bus disabled");
+#endif
         
         // Initialize LCD CS pin and PA enable pin
         gpio_config_t io_conf = {};
@@ -205,7 +209,9 @@ private:
 
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
-#if CONFIG_LAFVIN_SLOT_AUDITION
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+            Application::GetInstance().PreviousTerminalCard();
+#elif CONFIG_LAFVIN_SLOT_AUDITION
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateIdle &&
                 !app.GetAudioService().IsSlotAuditionRunning()) {
@@ -224,7 +230,18 @@ private:
 #endif
         });
 
-#if CONFIG_LAFVIN_SLOT_AUDITION
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+        boot_button_.OnLongPress([this]() {
+            ESP_LOGI(TAG, "UP long press: entering Wi-Fi configuration");
+            EnterWifiConfigMode();
+        });
+        down_button_.OnClick([]() {
+            Application::GetInstance().NextTerminalCard();
+        });
+        down_button_.OnLongPress([]() {
+            Application::GetInstance().RefreshTerminalFeed();
+        });
+#elif CONFIG_LAFVIN_SLOT_AUDITION
         down_button_.OnClick([this]() {
             StartAudition();
         });
@@ -394,16 +411,23 @@ public:
         // InitializeTouch();
         InitializeButtons();
         // InitializeCamera();
+#if !CONFIG_SYMBIOS_DISPLAY_ONLY
         InitializeTools();
+#endif
 
         GetBacklight()->RestoreBrightness();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+        ESP_LOGE(TAG, "Audio codec requested by display-only firmware");
+        return nullptr;
+#else
         static CustomAudioCodec audio_codec(
             i2c_bus_, 
             pa_en_pin_);
         return &audio_codec;
+#endif
     }
 
     virtual Display* GetDisplay() override {

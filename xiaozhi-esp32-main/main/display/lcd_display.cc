@@ -12,6 +12,7 @@
 #include <esp_lvgl_port.h>
 #include <esp_psram.h>
 #include <cstring>
+#include <ctime>
 #include <src/misc/cache/lv_cache.h>
 
 #include "board.h"
@@ -21,6 +22,34 @@
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 LV_FONT_DECLARE(font_awesome_30_4);
+LV_FONT_DECLARE(font_noto_basic_16_4);
+LV_FONT_DECLARE(font_noto_basic_30_4);
+#if CONFIG_SYMBIOS_TERMINAL_TICKER
+LV_FONT_DECLARE(astro_chrome_12);
+LV_FONT_DECLARE(astro_label_12);
+LV_FONT_DECLARE(astro_readout_16);
+LV_FONT_DECLARE(astro_title_18);
+LV_FONT_DECLARE(astro_display_34);
+#endif
+
+#if CONFIG_SYMBIOS_TERMINAL_TICKER
+namespace {
+constexpr lv_coord_t kTickerTitleY = 36;
+constexpr lv_coord_t kTickerTitleHeight = 24;
+constexpr lv_coord_t kTickerPrimaryY = 65;
+constexpr lv_coord_t kTickerPrimaryHeight = 48;
+constexpr lv_coord_t kTickerReadoutY = 116;
+constexpr lv_coord_t kTickerFooterY = 195;
+constexpr lv_coord_t kTickerFooterHeight = 30;
+
+static_assert(kTickerTitleY + kTickerTitleHeight < kTickerPrimaryY,
+              "ticker title and primary bands must not overlap");
+static_assert(kTickerPrimaryY + kTickerPrimaryHeight < kTickerReadoutY,
+              "ticker primary and readout bands must not overlap");
+static_assert(kTickerFooterY + kTickerFooterHeight <= 240,
+              "ticker footer must fit the 320x240 LAFVIN display");
+}  // namespace
+#endif
 
 void LcdDisplay::InitializeLcdThemes() {
     auto text_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_TEXT_FONT);
@@ -852,6 +881,179 @@ void LcdDisplay::SetupUI() {
     lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
 
+    /* Idle terminal dashboard - owns the screen while verified cards rotate. */
+#if CONFIG_SYMBIOS_TERMINAL_TICKER
+    constexpr uint32_t kPaper = 0xE6E5E0;
+    constexpr uint32_t kInk = 0x1A1A17;
+    constexpr uint32_t kGray1 = 0x55544F;
+    constexpr uint32_t kGray2 = 0x78776F;
+    constexpr uint32_t kHairline = 0x9B9A93;
+    constexpr uint32_t kRed = 0xC65545;
+    constexpr uint32_t kRedHi = 0xCF6A58;
+    constexpr uint32_t kOnAccent = 0xF2F1EC;
+
+    auto create_rule = [](lv_obj_t* parent, int x, int y, int width, int height,
+                          uint32_t color) {
+        lv_obj_t* rule = lv_obj_create(parent);
+        lv_obj_set_pos(rule, x, y);
+        lv_obj_set_size(rule, width, height);
+        lv_obj_set_style_radius(rule, 0, 0);
+        lv_obj_set_style_border_width(rule, 0, 0);
+        lv_obj_set_style_pad_all(rule, 0, 0);
+        lv_obj_set_style_bg_color(rule, lv_color_hex(color), 0);
+        lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
+        lv_obj_remove_flag(rule, LV_OBJ_FLAG_SCROLLABLE);
+        return rule;
+    };
+
+    ticker_panel_ = lv_obj_create(screen);
+    lv_obj_set_size(ticker_panel_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_radius(ticker_panel_, 0, 0);
+    lv_obj_set_style_border_width(ticker_panel_, 0, 0);
+    lv_obj_set_style_pad_all(ticker_panel_, 0, 0);
+    lv_obj_set_style_bg_color(ticker_panel_, lv_color_hex(kPaper), 0);
+    lv_obj_set_style_bg_opa(ticker_panel_, LV_OPA_COVER, 0);
+    lv_obj_set_scrollbar_mode(ticker_panel_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_remove_flag(ticker_panel_, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* New high-priority evidence gets one restrained pulse, never a loop. */
+    ticker_alert_frame_ = lv_obj_create(ticker_panel_);
+    lv_obj_set_pos(ticker_alert_frame_, 0, 0);
+    lv_obj_set_size(ticker_alert_frame_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_radius(ticker_alert_frame_, 0, 0);
+    lv_obj_set_style_border_width(ticker_alert_frame_, 4, 0);
+    lv_obj_set_style_border_color(ticker_alert_frame_, lv_color_hex(kRed), 0);
+    lv_obj_set_style_bg_opa(ticker_alert_frame_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_opa(ticker_alert_frame_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(ticker_alert_frame_, 0, 0);
+    lv_obj_remove_flag(ticker_alert_frame_, LV_OBJ_FLAG_SCROLLABLE);
+
+    ticker_brand_label_ = lv_label_create(ticker_panel_);
+    lv_label_set_text(ticker_brand_label_, "SYMBIOS");
+    lv_obj_set_style_text_font(ticker_brand_label_, &astro_chrome_12, 0);
+    lv_obj_set_style_text_color(ticker_brand_label_, lv_color_hex(kInk), 0);
+    lv_obj_set_pos(ticker_brand_label_, 14, 7);
+
+    ticker_time_label_ = lv_label_create(ticker_panel_);
+    lv_label_set_text(ticker_time_label_, "--:--");
+    lv_obj_set_width(ticker_time_label_, 54);
+    lv_obj_set_style_text_font(ticker_time_label_, &astro_chrome_12, 0);
+    lv_obj_set_style_text_align(ticker_time_label_, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(ticker_time_label_, lv_color_hex(kGray1), 0);
+    lv_obj_set_pos(ticker_time_label_, 153, 7);
+
+    ticker_status_chip_ = lv_obj_create(ticker_panel_);
+    lv_obj_set_pos(ticker_status_chip_, 224, 2);
+    lv_obj_set_size(ticker_status_chip_, 84, 25);
+    lv_obj_set_style_radius(ticker_status_chip_, 0, 0);
+    lv_obj_set_style_border_width(ticker_status_chip_, 0, 0);
+    lv_obj_set_style_pad_all(ticker_status_chip_, 0, 0);
+    lv_obj_set_style_bg_opa(ticker_status_chip_, LV_OPA_TRANSP, 0);
+    lv_obj_remove_flag(ticker_status_chip_, LV_OBJ_FLAG_SCROLLABLE);
+    ticker_status_label_ = lv_label_create(ticker_status_chip_);
+    lv_label_set_text(ticker_status_label_, "OFFLINE");
+    lv_obj_set_pos(ticker_status_label_, 0, 4);
+    lv_obj_set_width(ticker_status_label_, 84);
+    lv_obj_set_style_text_font(ticker_status_label_, &astro_chrome_12, 0);
+    lv_obj_set_style_text_align(ticker_status_label_, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(ticker_status_label_, lv_color_hex(kInk), 0);
+    ticker_status_rule_ = create_rule(ticker_status_chip_, 28, 20, 56, 2, kRed);
+
+    create_rule(ticker_panel_, 14, 28, 294, 1, kHairline);
+
+    /* The only filled accent is a strict 45-degree two-tone dither stamp. */
+    ticker_stamp_ = lv_canvas_create(ticker_panel_);
+    lv_canvas_set_buffer(ticker_stamp_, ticker_stamp_buffer_.data(), 104, 22,
+                         LV_COLOR_FORMAT_RGB565);
+    lv_canvas_fill_bg(ticker_stamp_, lv_color_hex(kRed), LV_OPA_COVER);
+    for (int y = 0; y < 22; ++y) {
+        for (int x = 0; x < 104; ++x) {
+            if ((x + y) % 3 == 2) {
+                lv_canvas_set_px(ticker_stamp_, x, y, lv_color_hex(kRedHi), LV_OPA_COVER);
+            }
+        }
+    }
+    lv_obj_set_pos(ticker_stamp_, 14, 36);
+
+    ticker_eyebrow_label_ = lv_label_create(ticker_stamp_);
+    lv_obj_set_pos(ticker_eyebrow_label_, 0, 3);
+    lv_obj_set_size(ticker_eyebrow_label_, 104, 16);
+    lv_label_set_long_mode(ticker_eyebrow_label_, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(ticker_eyebrow_label_, &astro_chrome_12, 0);
+    lv_obj_set_style_text_align(ticker_eyebrow_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(ticker_eyebrow_label_, lv_color_hex(kOnAccent), 0);
+
+    ticker_title_label_ = lv_label_create(ticker_panel_);
+    lv_obj_set_pos(ticker_title_label_, 126, kTickerTitleY);
+    lv_obj_set_size(ticker_title_label_, 180, kTickerTitleHeight);
+    lv_label_set_long_mode(ticker_title_label_, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(ticker_title_label_, &astro_title_18, 0);
+    lv_obj_set_style_text_color(ticker_title_label_, lv_color_hex(kInk), 0);
+
+    ticker_primary_label_ = lv_label_create(ticker_panel_);
+    lv_obj_set_pos(ticker_primary_label_, 14, kTickerPrimaryY);
+    lv_obj_set_size(ticker_primary_label_, 292, kTickerPrimaryHeight);
+    lv_label_set_long_mode(ticker_primary_label_, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(ticker_primary_label_, &astro_display_34, 0);
+    lv_obj_set_style_text_color(ticker_primary_label_, lv_color_hex(kInk), 0);
+
+    /* ConsoleReadout: heavy top rule, hairline bottom, one-pixel dividers. */
+    create_rule(ticker_panel_, 14, 116, 294, 2, kInk);
+    create_rule(ticker_panel_, 14, 181, 294, 1, kHairline);
+    create_rule(ticker_panel_, 112, 118, 1, 63, kHairline);
+    create_rule(ticker_panel_, 203, 118, 1, 63, kHairline);
+
+    auto create_readout_cell = [&](int x, int width, lv_obj_t** card,
+                                   lv_obj_t** label, lv_obj_t** value) {
+        *card = lv_obj_create(ticker_panel_);
+        lv_obj_set_pos(*card, x, 118);
+        lv_obj_set_size(*card, width, 63);
+        lv_obj_set_style_radius(*card, 0, 0);
+        lv_obj_set_style_border_width(*card, 0, 0);
+        lv_obj_set_style_pad_all(*card, 0, 0);
+        lv_obj_set_style_bg_opa(*card, LV_OPA_TRANSP, 0);
+        lv_obj_set_scrollbar_mode(*card, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_remove_flag(*card, LV_OBJ_FLAG_SCROLLABLE);
+
+        *label = lv_label_create(*card);
+        lv_obj_set_pos(*label, 5, 7);
+        lv_obj_set_size(*label, width - 10, 16);
+        lv_label_set_long_mode(*label, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_font(*label, &astro_label_12, 0);
+        lv_obj_set_style_text_color(*label, lv_color_hex(kGray2), 0);
+
+        *value = lv_label_create(*card);
+        lv_obj_set_pos(*value, 5, 29);
+        lv_obj_set_size(*value, width - 10, 22);
+        lv_label_set_long_mode(*value, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_font(*value, &astro_readout_16, 0);
+        lv_obj_set_style_text_color(*value, lv_color_hex(kInk), 0);
+    };
+    create_readout_cell(14, 98, &ticker_change_chip_, &ticker_change_caption_,
+                        &ticker_change_label_);
+    create_readout_cell(113, 90, &ticker_left_card_, &ticker_left_label_,
+                        &ticker_left_value_);
+    create_readout_cell(204, 104, &ticker_right_card_, &ticker_right_label_,
+                        &ticker_right_value_);
+
+    ticker_footer_label_ = lv_label_create(ticker_panel_);
+    lv_obj_set_pos(ticker_footer_label_, 14, kTickerFooterY);
+    lv_obj_set_size(ticker_footer_label_, 220, kTickerFooterHeight);
+    lv_label_set_long_mode(ticker_footer_label_, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(ticker_footer_label_, &astro_chrome_12, 0);
+    lv_obj_set_style_text_color(ticker_footer_label_, lv_color_hex(kGray1), 0);
+
+    ticker_page_label_ = lv_label_create(ticker_panel_);
+    lv_obj_set_pos(ticker_page_label_, 240, 197);
+    lv_obj_set_size(ticker_page_label_, 68, 16);
+    lv_obj_set_style_text_font(ticker_page_label_, &astro_chrome_12, 0);
+    lv_obj_set_style_text_align(ticker_page_label_, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(ticker_page_label_, lv_color_hex(kInk), 0);
+    ticker_page_rule_ = create_rule(ticker_panel_, 268, 217, 40, 2, kRed);
+
+    lv_obj_add_flag(ticker_panel_, LV_OBJ_FLAG_HIDDEN);
+#endif
+
     /* Layer 1: Top bar - for status icons */
     top_bar_ = lv_obj_create(screen);
     lv_obj_set_size(top_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
@@ -1071,10 +1273,167 @@ void LcdDisplay::ClearChatMessages() {
 }
 #endif
 
+void LcdDisplay::SetTerminalCard(const TerminalCard& card) {
+#if !CONFIG_SYMBIOS_TERMINAL_TICKER
+    (void)card;
+    return;
+#else
+    if (card.title.empty() || card.primary.empty()) {
+        return;
+    }
+
+    DisplayLockGuard lock(this);
+    if (ticker_panel_ == nullptr || ticker_primary_label_ == nullptr) {
+        ESP_LOGW(TAG, "Terminal dashboard is unavailable");
+        return;
+    }
+
+    // Configure every fixed text band before assigning its text. LVGL's dots
+    // mode then measures against the final font and bounds, so an incoming
+    // narrative can never grow into the title or console readout bands.
+    lv_obj_set_size(ticker_title_label_, 180, kTickerTitleHeight);
+    lv_label_set_long_mode(ticker_title_label_, LV_LABEL_LONG_DOT);
+    if (card.kind == TerminalCardKind::kNarrative) {
+        lv_obj_set_style_text_font(ticker_primary_label_, &astro_title_18, 0);
+    } else {
+        lv_obj_set_style_text_font(ticker_primary_label_, &astro_display_34, 0);
+    }
+    lv_obj_set_size(ticker_primary_label_, 292, kTickerPrimaryHeight);
+    lv_label_set_long_mode(ticker_primary_label_, LV_LABEL_LONG_DOT);
+    lv_obj_set_size(ticker_footer_label_, 220, kTickerFooterHeight);
+    lv_label_set_long_mode(ticker_footer_label_, LV_LABEL_LONG_DOT);
+
+    lv_label_set_text(ticker_status_label_, card.status.c_str());
+    lv_label_set_text(ticker_eyebrow_label_, card.eyebrow.c_str());
+    lv_label_set_text(ticker_title_label_, card.title.c_str());
+    lv_label_set_text(ticker_primary_label_, card.primary.c_str());
+    lv_label_set_text(ticker_change_caption_,
+                      card.change_label.empty() ? "CHANGE" : card.change_label.c_str());
+    lv_label_set_text(ticker_change_label_, card.change.c_str());
+    lv_label_set_text(ticker_left_label_, card.left_label.c_str());
+    lv_label_set_text(ticker_left_value_, card.left_value.c_str());
+    lv_label_set_text(ticker_right_label_, card.right_label.c_str());
+    lv_label_set_text(ticker_right_value_, card.right_value.c_str());
+    lv_label_set_text(ticker_footer_label_, card.footer.c_str());
+
+    char page[20];
+    std::snprintf(page, sizeof(page), "%u / %u",
+                  static_cast<unsigned>(card.page_index + 1),
+                  static_cast<unsigned>(card.page_count));
+    lv_label_set_text(ticker_page_label_, page);
+
+    std::time_t now = std::time(nullptr);
+    struct tm local_time = {};
+    char clock[8] = "--:--";
+    if (now > 0 && localtime_r(&now, &local_time) != nullptr) {
+        std::strftime(clock, sizeof(clock), "%H:%M", &local_time);
+    }
+    lv_label_set_text(ticker_time_label_, clock);
+
+    lv_color_t status_color = lv_color_hex(0x1A1A17);
+    lv_color_t status_rule = lv_color_hex(0xC65545);
+    if (card.status == "DELAYED" || card.status == "STALE") {
+        status_color = lv_color_hex(0x55544F);
+    } else if (card.status == "OFFLINE") {
+        status_color = lv_color_hex(0xC65545);
+    }
+    lv_obj_set_style_text_color(ticker_status_label_, status_color, 0);
+    lv_obj_set_style_bg_color(ticker_status_rule_, status_rule, 0);
+
+    lv_color_t tone_color = lv_color_hex(0x1A1A17);
+    switch (card.tone) {
+        case TerminalCardTone::kPositive:
+            tone_color = lv_color_hex(0x5A6E8C);
+            break;
+        case TerminalCardTone::kNegative:
+            tone_color = lv_color_hex(0xC65545);
+            break;
+        case TerminalCardTone::kWarning:
+            tone_color = lv_color_hex(0xC65545);
+            break;
+        case TerminalCardTone::kNeutral:
+            break;
+    }
+    lv_obj_set_style_text_color(ticker_change_label_, tone_color, 0);
+
+    if (ticker_alert_frame_ != nullptr) {
+        lv_anim_delete(ticker_alert_frame_, nullptr);
+        lv_obj_set_style_opa(ticker_alert_frame_, LV_OPA_TRANSP, 0);
+        if (card.animate_alert) {
+            lv_obj_move_to_index(ticker_alert_frame_, -1);
+            lv_anim_t pulse;
+            lv_anim_init(&pulse);
+            lv_anim_set_var(&pulse, ticker_alert_frame_);
+            lv_anim_set_exec_cb(&pulse, [](void* object, int32_t value) {
+                lv_obj_set_style_opa(static_cast<lv_obj_t*>(object),
+                                     static_cast<lv_opa_t>(value), 0);
+            });
+            lv_anim_set_values(&pulse, LV_OPA_COVER, LV_OPA_TRANSP);
+            lv_anim_set_duration(&pulse, 280);
+            lv_anim_set_repeat_count(&pulse, 2);
+            lv_anim_set_repeat_delay(&pulse, 90);
+            lv_anim_set_path_cb(&pulse, lv_anim_path_ease_out);
+            lv_anim_start(&pulse);
+        }
+    }
+
+    if (emoji_box_ != nullptr) {
+        lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (preview_image_ != nullptr) {
+        lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (bottom_bar_ != nullptr) {
+        lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
+    }
+    // The regular status/chat widgets are created after the dashboard. Raise
+    // the dashboard while idle so those transparent layers cannot cover its
+    // own header; SetEmotion hides it again for every voice/system state.
+    lv_obj_move_to_index(ticker_panel_, -1);
+    lv_obj_remove_flag(ticker_panel_, LV_OBJ_FLAG_HIDDEN);
+
+    ESP_LOGI(TAG, "Terminal dashboard displayed: %s (%u/%u)",
+             card.title.c_str(), static_cast<unsigned>(card.page_index + 1),
+             static_cast<unsigned>(card.page_count));
+#endif
+}
+
+void LcdDisplay::SetTerminalTicker(const char* content) {
+    if (content == nullptr || content[0] == '\0') {
+        return;
+    }
+    TerminalCard card;
+    card.status = "LIVE";
+    card.eyebrow = "TERMINAL";
+    card.title = "MARKET";
+    card.primary = content;
+    card.change_label = "STATE";
+    card.change = "LEGACY";
+    card.left_label = "SOURCE";
+    card.left_value = "SYMBIOS";
+    card.right_label = "MODE";
+    card.right_value = "READ ONLY";
+    card.footer = "VOICE READY";
+    SetTerminalCard(card);
+}
+
 void LcdDisplay::SetEmotion(const char* emotion) {
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetEmotion('%s') called before SetupUI() - emotion will not be displayed!", emotion);
     }
+
+    // Voice and system states take priority over the idle ticker. The feed
+    // task will restore the next market page after the device returns idle.
+    {
+        DisplayLockGuard lock(this);
+        if (ticker_panel_ != nullptr) {
+            lv_obj_add_flag(ticker_panel_, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (emoji_box_ != nullptr) {
+            lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     // Stop any running GIF animation
     if (gif_controller_) {
         DisplayLockGuard lock(this);

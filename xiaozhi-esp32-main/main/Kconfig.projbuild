@@ -24,6 +24,15 @@ config SYMBIOS_GATEWAY_URL
         Replace the .invalid review placeholder at build time. Do not put API
         keys or shared provider credentials in this value.
 
+config SYMBIOS_TIMEZONE
+    string "Symbios terminal POSIX timezone"
+    depends on SYMBIOS_VOICE_GATEWAY
+    default "UTC0"
+    help
+        POSIX TZ string used by the local clock renderer. Keep the UTC default
+        for generic builds and set a location-specific value only in the local
+        board build configuration. For Lima (UTC-5), use PET5.
+
 config SYMBIOS_TERMINAL_TICKER
     bool "Show authenticated APEX/market ticker while idle"
     depends on SYMBIOS_VOICE_GATEWAY && BOARD_TYPE_LAFVIN_AICHATBOT
@@ -34,13 +43,14 @@ config SYMBIOS_TERMINAL_TICKER
         Listening, speaking, activation, and error screens always take priority.
 
 config SYMBIOS_DISPLAY_ONLY
-    bool "Disable all Symbios voice sessions and operate as a portfolio display only"
+    bool "Operate as an authenticated APEX display without audio or voice"
     depends on SYMBIOS_VOICE_GATEWAY && SYMBIOS_TERMINAL_TICKER
     default n
     help
-        Keep authenticated enrollment and the bounded terminal feed, but never
-        create a device WebSocket protocol or contact a voice provider. Buttons
-        and wake words cannot open a cloud audio session in this mode.
+        Keep device-scoped bootstrap authentication and the bounded terminal
+        feed, but do not initialize audio hardware, create voice protocols,
+        check for automatic firmware/assets updates, or play sounds. This is a
+        dedicated portfolio-display build, not a runtime voice fallback.
 
 config SYMBIOS_TERMINAL_FEED_URL
     string "Symbios terminal feed URL"
@@ -64,7 +74,7 @@ config SYMBIOS_TICKER_PAGE_SECONDS
 
 config LAFVIN_AUDIO_DIAGNOSTIC
     bool "Enable local-only LAFVIN microphone diagnostics"
-    depends on BOARD_TYPE_LAFVIN_AICHATBOT
+    depends on BOARD_TYPE_LAFVIN_AICHATBOT && !SYMBIOS_DISPLAY_ONLY
     default n
     help
         Log aggregate input amplitude for each configured audio channel once
@@ -74,7 +84,7 @@ config LAFVIN_AUDIO_DIAGNOSTIC
 
 config LAFVIN_MONO_MIC_INPUT
     bool "Use LAFVIN ES7210 slot 0 as mono microphone input"
-    depends on BOARD_TYPE_LAFVIN_AICHATBOT
+    depends on BOARD_TYPE_LAFVIN_AICHATBOT && !SYMBIOS_DISPLAY_ONLY
     default n
     help
         Configure the LAFVIN audio codec as one microphone channel sourced from
@@ -85,7 +95,7 @@ config LAFVIN_MONO_MIC_INPUT
 
 config LAFVIN_SLOT_AUDITION
     bool "Enable RAM-only LAFVIN ES7210 slot audition"
-    depends on BOARD_TYPE_LAFVIN_AICHATBOT
+    depends on BOARD_TYPE_LAFVIN_AICHATBOT && !SYMBIOS_DISPLAY_ONLY
     default n
     help
         Build a review-only local diagnostic that repurposes the documented UP
@@ -97,7 +107,7 @@ config LAFVIN_SLOT_AUDITION
 
 config SYMBIOS_AUTO_SUBMIT_ON_SILENCE
     bool "Automatically submit a Symbios voice turn after speech ends"
-    depends on SYMBIOS_VOICE_GATEWAY && BOARD_TYPE_LAFVIN_AICHATBOT && USE_AUDIO_PROCESSOR
+    depends on SYMBIOS_VOICE_GATEWAY && BOARD_TYPE_LAFVIN_AICHATBOT && USE_AUDIO_PROCESSOR && !SYMBIOS_DISPLAY_ONLY
     default n
     help
         Use the existing on-device AFE voice-activity detector to submit an
@@ -105,6 +115,15 @@ config SYMBIOS_AUTO_SUBMIT_ON_SILENCE
         Manual listening and the physical DOWN-button submit fallback remain
         available. This is default-off so stock and non-Symbios builds retain
         upstream behavior.
+
+config SYMBIOS_PREWARM_AUDIO_CHANNEL
+    bool "Prewarm the authenticated Symbios voice channel after boot"
+    depends on SYMBIOS_VOICE_GATEWAY && !SYMBIOS_DISPLAY_ONLY
+    default n
+    help
+        Open the authenticated WebSocket after activation so OTA credential
+        refresh, TLS, and provider setup happen before the first wake phrase.
+        The channel remains device-scoped and provider keys stay server-side.
 
 config SYMBIOS_AUTO_SUBMIT_SILENCE_MS
     int "Silence before automatic Symbios turn submission (ms)"

@@ -42,7 +42,14 @@ set(SOURCES "audio/audio_codec.cc"
 set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "audio/demuxer" "protocols")
 
 if(CONFIG_SYMBIOS_TERMINAL_TICKER)
-    list(APPEND SOURCES "terminal_feed.cc")
+    list(APPEND SOURCES
+        "terminal_feed.cc"
+        "display/fonts/astro_chrome_12.c"
+        "display/fonts/astro_label_12.c"
+        "display/fonts/astro_readout_16.c"
+        "display/fonts/astro_title_18.c"
+        "display/fonts/astro_display_34.c"
+    )
 endif()
 
 # Add board common files

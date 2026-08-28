@@ -166,6 +166,15 @@ void EmoteDisplay::SetTerminalTicker(const char* const content)
     }
 }
 
+void EmoteDisplay::SetTerminalCard(const TerminalCard& card)
+{
+    std::string content = card.title + " " + card.primary;
+    if (!card.change.empty()) {
+        content += " " + card.change;
+    }
+    SetTerminalTicker(content.c_str());
+}
+
 void EmoteDisplay::SetStatus(const char* const status)
 {
     ESP_LOGI(TAG, "SetStatus: %s", status);

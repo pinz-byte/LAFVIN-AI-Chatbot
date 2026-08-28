@@ -14,6 +14,7 @@
 
 #include <string>
 #include <chrono>
+#include <cstddef>
 
 class Theme {
 public:
@@ -23,6 +24,43 @@ public:
     inline std::string name() const { return name_; }
 private:
     std::string name_;
+};
+
+enum class TerminalCardKind {
+    kPortfolio,
+    kAsset,
+    kNarrative,
+    kEmpty,
+};
+
+enum class TerminalCardTone {
+    kNeutral,
+    kPositive,
+    kNegative,
+    kWarning,
+};
+
+// A bounded, presentation-ready market card. The network/parser layer owns
+// validation and formatting; display implementations only arrange the fields.
+struct TerminalCard {
+    TerminalCardKind kind = TerminalCardKind::kEmpty;
+    TerminalCardTone tone = TerminalCardTone::kNeutral;
+    std::string status;
+    std::string eyebrow;
+    std::string title;
+    std::string primary;
+    std::string change_label;
+    std::string change;
+    std::string left_label;
+    std::string left_value;
+    std::string right_label;
+    std::string right_value;
+    std::string footer;
+    size_t page_index = 0;
+    size_t page_count = 1;
+    bool high_priority_alert = false;
+    bool animate_alert = false;
+    std::string evidence_id;
 };
 
 class Display {
@@ -35,6 +73,7 @@ public:
     virtual void ShowNotification(const std::string &notification, int duration_ms = 3000);
     virtual void SetEmotion(const char* emotion);
     virtual void SetChatMessage(const char* role, const char* content);
+    virtual void SetTerminalCard(const TerminalCard& card);
     virtual void SetTerminalTicker(const char* content);
     virtual void ClearChatMessages();
     virtual void SetTheme(Theme* theme);

@@ -26,7 +26,7 @@
 
 
 Ota::Ota() {
-#ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
+#if defined(CONFIG_SYMBIOS_VOICE_GATEWAY) && !CONFIG_SYMBIOS_DISPLAY_ONLY
     // Never reuse a WebSocket destination issued by the factory cloud. A
     // fresh, short-lived destination and bearer token must come from Symbios.
     Settings websocket_settings("websocket", true);
@@ -197,6 +197,9 @@ esp_err_t Ota::CheckVersion() {
     has_websocket_config_ = false;
     cJSON *websocket = cJSON_GetObjectItem(root, "websocket");
     if (cJSON_IsObject(websocket)) {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+        ESP_LOGW(TAG, "Ignoring WebSocket configuration in display-only mode");
+#else
 #ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
         cJSON *url = cJSON_GetObjectItem(websocket, "url");
         cJSON *token = cJSON_GetObjectItem(websocket, "token");
@@ -225,6 +228,7 @@ esp_err_t Ota::CheckVersion() {
             }
         }
         has_websocket_config_ = true;
+#endif
     } else {
         ESP_LOGI(TAG, "No websocket section found!");
     }
@@ -256,6 +260,13 @@ esp_err_t Ota::CheckVersion() {
 
     has_new_version_ = false;
     cJSON *firmware = cJSON_GetObjectItem(root, "firmware");
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    if (cJSON_IsObject(firmware)) {
+        ESP_LOGW(TAG, "Ignoring firmware update metadata in display-only mode");
+    } else {
+        ESP_LOGI(TAG, "No firmware section found!");
+    }
+#else
     if (cJSON_IsObject(firmware)) {
         cJSON *version = cJSON_GetObjectItem(firmware, "version");
         if (cJSON_IsString(version)) {
@@ -283,6 +294,7 @@ esp_err_t Ota::CheckVersion() {
     } else {
         ESP_LOGW(TAG, "No firmware section found!");
     }
+#endif
 
     cJSON_Delete(root);
     return ESP_OK;

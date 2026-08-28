@@ -9,6 +9,8 @@
 #include <font_emoji.h>
 
 #include <atomic>
+#include <array>
+#include <cstdint>
 #include <memory>
 
 #define PREVIEW_IMAGE_DURATION_MS 5000
@@ -32,6 +34,32 @@ protected:
     std::unique_ptr<LvglGif> gif_controller_ = nullptr;
     lv_obj_t* emoji_box_ = nullptr;
     lv_obj_t* chat_message_label_ = nullptr;
+    lv_obj_t* ticker_panel_ = nullptr;
+    lv_obj_t* ticker_brand_label_ = nullptr;
+    lv_obj_t* ticker_time_label_ = nullptr;
+    lv_obj_t* ticker_status_chip_ = nullptr;
+    lv_obj_t* ticker_status_label_ = nullptr;
+    lv_obj_t* ticker_status_rule_ = nullptr;
+    lv_obj_t* ticker_stamp_ = nullptr;
+    lv_obj_t* ticker_eyebrow_label_ = nullptr;
+    lv_obj_t* ticker_title_label_ = nullptr;
+    lv_obj_t* ticker_primary_label_ = nullptr;
+    lv_obj_t* ticker_change_chip_ = nullptr;
+    lv_obj_t* ticker_change_caption_ = nullptr;
+    lv_obj_t* ticker_change_label_ = nullptr;
+    lv_obj_t* ticker_left_card_ = nullptr;
+    lv_obj_t* ticker_left_label_ = nullptr;
+    lv_obj_t* ticker_left_value_ = nullptr;
+    lv_obj_t* ticker_right_card_ = nullptr;
+    lv_obj_t* ticker_right_label_ = nullptr;
+    lv_obj_t* ticker_right_value_ = nullptr;
+    lv_obj_t* ticker_footer_label_ = nullptr;
+    lv_obj_t* ticker_page_label_ = nullptr;
+    lv_obj_t* ticker_page_rule_ = nullptr;
+    lv_obj_t* ticker_alert_frame_ = nullptr;
+#if CONFIG_SYMBIOS_TERMINAL_TICKER
+    std::array<uint16_t, 104 * 22> ticker_stamp_buffer_{};
+#endif
     esp_timer_handle_t preview_timer_ = nullptr;
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
     bool hide_subtitle_ = false;  // Control whether to hide chat messages/subtitles
@@ -48,6 +76,8 @@ public:
     ~LcdDisplay();
     virtual void SetEmotion(const char* emotion) override;
     virtual void SetChatMessage(const char* role, const char* content) override;
+    virtual void SetTerminalCard(const TerminalCard& card) override;
+    virtual void SetTerminalTicker(const char* content) override;
     virtual void ClearChatMessages() override;
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
     virtual void SetupUI() override;

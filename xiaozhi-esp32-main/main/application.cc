@@ -10,7 +10,9 @@
 #include "assets.h"
 #include "settings.h"
 
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <esp_log.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
@@ -58,20 +60,6 @@ Application::Application() {
     };
     ESP_ERROR_CHECK(esp_timer_create(&auto_submit_timer_args, &auto_submit_timer_handle_));
 #endif
-
-#if CONFIG_SYMBIOS_VOICE_GATEWAY
-    esp_timer_create_args_t symbios_idle_timer_args = {
-        .callback = [](void* arg) {
-            Application* app = static_cast<Application*>(arg);
-            xEventGroupSetBits(app->event_group_, MAIN_EVENT_SYMBIOS_IDLE_TIMEOUT);
-        },
-        .arg = this,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name = "symbios_idle",
-        .skip_unhandled_events = true
-    };
-    ESP_ERROR_CHECK(esp_timer_create(&symbios_idle_timer_args, &symbios_idle_timer_handle_));
-#endif
 }
 
 Application::~Application() {
@@ -86,12 +74,6 @@ Application::~Application() {
         esp_timer_delete(auto_submit_timer_handle_);
     }
 #endif
-#if CONFIG_SYMBIOS_VOICE_GATEWAY
-    if (symbios_idle_timer_handle_ != nullptr) {
-        esp_timer_stop(symbios_idle_timer_handle_);
-        esp_timer_delete(symbios_idle_timer_handle_);
-    }
-#endif
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
@@ -104,6 +86,15 @@ bool Application::SetDeviceState(DeviceState state) {
 }
 
 void Application::Initialize() {
+#if CONFIG_SYMBIOS_VOICE_GATEWAY
+    if (setenv("TZ", CONFIG_SYMBIOS_TIMEZONE, 1) != 0) {
+        ESP_LOGW(TAG, "Could not configure local timezone");
+    } else {
+        tzset();
+        ESP_LOGI(TAG, "Local timezone configured: %s", CONFIG_SYMBIOS_TIMEZONE);
+    }
+#endif
+
     auto& board = Board::GetInstance();
     SetDeviceState(kDeviceStateStarting);
 
@@ -113,7 +104,8 @@ void Application::Initialize() {
     // Print board name/version info
     display->SetChatMessage("system", SystemInfo::GetUserAgent().c_str());
 
-    // Setup the audio service
+    // A display-only build never constructs the codec or starts any audio task.
+#if !CONFIG_SYMBIOS_DISPLAY_ONLY
     auto codec = board.GetAudioCodec();
     audio_service_.Initialize(codec);
     audio_service_.Start();
@@ -129,6 +121,9 @@ void Application::Initialize() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
     };
     audio_service_.SetCallbacks(callbacks);
+#else
+    ESP_LOGI(TAG, "Display-only mode: audio hardware and audio tasks disabled");
+#endif
 
     // Add state change listeners
     state_machine_.AddStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
@@ -138,10 +133,12 @@ void Application::Initialize() {
     // Start the clock timer to update the status bar
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
 
-    // Add MCP common tools (only once during initialization)
+    // Voice/device-control tools are not exposed by the read-only display.
+#if !CONFIG_SYMBIOS_DISPLAY_ONLY
     auto& mcp_server = McpServer::GetInstance();
     mcp_server.AddCommonTools();
     mcp_server.AddUserOnlyTools();
+#endif
 
     // Set network event callback for UI updates and network state handling
     board.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
@@ -149,10 +146,17 @@ void Application::Initialize() {
         
         switch (event) {
             case NetworkEvent::Scanning:
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+                display->SetStatus("OFFLINE");
+#else
                 display->ShowNotification(Lang::Strings::SCANNING_WIFI, 30000);
+#endif
                 xEventGroupSetBits(event_group_, MAIN_EVENT_NETWORK_DISCONNECTED);
                 break;
             case NetworkEvent::Connecting: {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+                display->SetStatus("CONNECTING");
+#else
                 if (data.empty()) {
                     // Cellular network - registering without carrier info yet
                     display->SetStatus(Lang::Strings::REGISTERING_NETWORK);
@@ -163,12 +167,17 @@ void Application::Initialize() {
                     msg += "...";
                     display->ShowNotification(msg.c_str(), 30000);
                 }
+#endif
                 break;
             }
             case NetworkEvent::Connected: {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+                display->SetStatus("SYNCING");
+#else
                 std::string msg = Lang::Strings::CONNECTED_TO;
                 msg += data;
                 display->ShowNotification(msg.c_str(), 30000);
+#endif
                 xEventGroupSetBits(event_group_, MAIN_EVENT_NETWORK_CONNECTED);
                 break;
             }
@@ -186,19 +195,38 @@ void Application::Initialize() {
                 display->SetStatus(Lang::Strings::DETECTING_MODULE);
                 break;
             case NetworkEvent::ModemErrorNoSim:
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+                display->SetStatus("OFFLINE");
+#else
                 Alert(Lang::Strings::ERROR, Lang::Strings::PIN_ERROR, "triangle_exclamation", Lang::Sounds::OGG_ERR_PIN);
+#endif
                 break;
             case NetworkEvent::ModemErrorRegDenied:
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+                display->SetStatus("OFFLINE");
+#else
                 Alert(Lang::Strings::ERROR, Lang::Strings::REG_ERROR, "triangle_exclamation", Lang::Sounds::OGG_ERR_REG);
+#endif
                 break;
             case NetworkEvent::ModemErrorInitFailed:
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+                display->SetStatus("OFFLINE");
+#else
                 Alert(Lang::Strings::ERROR, Lang::Strings::MODEM_INIT_ERROR, "triangle_exclamation", Lang::Sounds::OGG_EXCLAMATION);
+#endif
                 break;
             case NetworkEvent::ModemErrorTimeout:
                 display->SetStatus(Lang::Strings::REGISTERING_NETWORK);
                 break;
         }
     });
+
+#if CONFIG_SYMBIOS_DISPLAY_ONLY && CONFIG_SYMBIOS_TERMINAL_TICKER
+    // Start before network so a bounded last-known card can render immediately.
+    terminal_feed_ = std::make_unique<TerminalFeed>();
+    terminal_feed_->Start();
+    SetDeviceState(kDeviceStateIdle);
+#endif
 
     // Start network asynchronously
     board.StartNetwork();
@@ -225,15 +253,18 @@ void Application::Run() {
         MAIN_EVENT_STOP_LISTENING |
         MAIN_EVENT_ACTIVATION_DONE |
         MAIN_EVENT_STATE_CHANGED |
-        MAIN_EVENT_AUTO_STOP_LISTENING |
-        MAIN_EVENT_SYMBIOS_IDLE_TIMEOUT;
+        MAIN_EVENT_AUTO_STOP_LISTENING;
 
     while (true) {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
 
         if (bits & MAIN_EVENT_ERROR) {
             SetDeviceState(kDeviceStateIdle);
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+            ESP_LOGW(TAG, "Display-only background error: %s", last_error_message_.c_str());
+#else
             Alert(Lang::Strings::ERROR, last_error_message_.c_str(), "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
+#endif
         }
 
         if (bits & MAIN_EVENT_NETWORK_CONNECTED) {
@@ -252,6 +283,7 @@ void Application::Run() {
             HandleStateChangedEvent();
         }
 
+#if !CONFIG_SYMBIOS_DISPLAY_ONLY
         if (bits & MAIN_EVENT_TOGGLE_CHAT) {
             HandleToggleChatEvent();
         }
@@ -285,16 +317,11 @@ void Application::Run() {
 #endif
             }
         }
+#endif
 
 #if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
         if (bits & MAIN_EVENT_AUTO_STOP_LISTENING) {
             HandleAutoStopListeningEvent();
-        }
-#endif
-
-#if CONFIG_SYMBIOS_VOICE_GATEWAY
-        if (bits & MAIN_EVENT_SYMBIOS_IDLE_TIMEOUT) {
-            HandleSymbiosIdleTimeoutEvent();
         }
 #endif
 
@@ -311,6 +338,20 @@ void Application::Run() {
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
+
+#if CONFIG_SYMBIOS_PREWARM_AUDIO_CHANNEL && !CONFIG_SYMBIOS_DISPLAY_ONLY
+            // Cloud transports can eventually recycle an otherwise healthy
+            // long-lived socket. Restore it while idle so the next wake never
+            // pays the authentication and provider setup penalty.
+            if (clock_ticks_ % 10 == 0 &&
+                GetDeviceState() == kDeviceStateIdle && protocol_ &&
+                !protocol_->IsAudioChannelOpened()) {
+                ESP_LOGI(TAG, "Restoring warm Symbios audio channel");
+                if (!protocol_->OpenAudioChannel()) {
+                    ESP_LOGW(TAG, "Warm-channel restore failed; retrying in 10 seconds");
+                }
+            }
+#endif
         
             // Print debug info every 10 seconds
             if (clock_ticks_ % 10 == 0) {
@@ -322,8 +363,20 @@ void Application::Run() {
 
 void Application::HandleNetworkConnectedEvent() {
     ESP_LOGI(TAG, "Network connected");
-    auto state = GetDeviceState();
 
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    if (!display_bootstrap_started_) {
+        display_bootstrap_started_ = true;
+        SetDeviceState(kDeviceStateActivating);
+        xTaskCreate([](void* arg) {
+            Application* app = static_cast<Application*>(arg);
+            app->ActivationTask();
+            app->activation_task_handle_ = nullptr;
+            vTaskDelete(NULL);
+        }, "display_bootstrap", 4096 * 2, this, 2, &activation_task_handle_);
+    }
+#else
+    auto state = GetDeviceState();
     if (state == kDeviceStateStarting || state == kDeviceStateWifiConfiguring) {
         // Network is ready, start activation
         SetDeviceState(kDeviceStateActivating);
@@ -339,6 +392,7 @@ void Application::HandleNetworkConnectedEvent() {
             vTaskDelete(NULL);
         }, "activation", 4096 * 2, this, 2, &activation_task_handle_);
     }
+#endif
 
     // Update the status bar immediately to show the network state
     auto display = Board::GetInstance().GetDisplay();
@@ -346,12 +400,14 @@ void Application::HandleNetworkConnectedEvent() {
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
+#if !CONFIG_SYMBIOS_DISPLAY_ONLY
     // Close current conversation when network disconnected
     auto state = GetDeviceState();
     if (state == kDeviceStateConnecting || state == kDeviceStateListening || state == kDeviceStateSpeaking) {
         ESP_LOGI(TAG, "Closing audio channel due to network disconnection");
         protocol_->CloseAudioChannel();
     }
+#endif
 
     // Update the status bar immediately to show the network state
     auto display = Board::GetInstance().GetDisplay();
@@ -364,14 +420,15 @@ void Application::HandleActivationDoneEvent() {
     SystemInfo::PrintHeapStats();
     SetDeviceState(kDeviceStateIdle);
 
-    has_server_time_ = ota_->HasServerTime();
+    has_server_time_ = ota_ != nullptr && ota_->HasServerTime();
 
     auto display = Board::GetInstance().GetDisplay();
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    display->SetStatus("PORTFOLIO");
+#else
     std::string message = std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
     display->ShowNotification(message.c_str());
     display->SetChatMessage("system", "");
-#if CONFIG_SYMBIOS_DISPLAY_ONLY
-    display->SetStatus("PORTFOLIO");
 #endif
 
     // Release OTA object after activation is complete
@@ -391,6 +448,20 @@ void Application::HandleActivationDoneEvent() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     });
+
+#if CONFIG_SYMBIOS_PREWARM_AUDIO_CHANNEL
+    Schedule([this]() {
+        if (!protocol_ || protocol_->IsAudioChannelOpened()) {
+            return;
+        }
+        ESP_LOGI(TAG, "Prewarming authenticated Symbios audio channel");
+        if (protocol_->OpenAudioChannel()) {
+            ESP_LOGI(TAG, "Symbios audio channel is warm");
+        } else {
+            ESP_LOGW(TAG, "Symbios audio prewarm failed; next wake will retry");
+        }
+    });
+#endif
 #endif
 }
 
@@ -398,6 +469,10 @@ void Application::ActivationTask() {
     // Create OTA object for activation process
     ota_ = std::make_unique<Ota>();
 
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    // One fail-soft authenticated bootstrap. No assets or firmware update path.
+    CheckDisplayBootstrap();
+#else
     // Check for new assets version
     CheckAssetsVersion();
 
@@ -406,9 +481,50 @@ void Application::ActivationTask() {
 
     // Initialize the protocol
     InitializeProtocol();
+#endif
 
     // Signal completion to main loop
     xEventGroupSetBits(event_group_, MAIN_EVENT_ACTIVATION_DONE);
+}
+
+void Application::CheckDisplayBootstrap() {
+    auto display = Board::GetInstance().GetDisplay();
+    display->SetStatus("SYNCING");
+
+    const esp_err_t result = ota_->CheckVersion();
+    if (result != ESP_OK) {
+        ESP_LOGW(TAG, "Display bootstrap unavailable: %s; continuing with cache",
+                 esp_err_to_name(result));
+        return;
+    }
+
+    // Accept the manually written application partition, but never consume a
+    // firmware or assets URL in display-only mode.
+    ota_->MarkCurrentVersionValid();
+
+    if (!ota_->HasActivationCode() && !ota_->HasActivationChallenge()) {
+        return;
+    }
+
+    display->SetStatus(Lang::Strings::ACTIVATION);
+    if (ota_->HasActivationCode()) {
+        ShowActivationCode(ota_->GetActivationCode(), ota_->GetActivationMessage());
+    }
+
+    // Enrollment is the only bounded retry loop. It posts the device challenge
+    // but does not repeat bootstrap or create a voice session.
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        const esp_err_t activation = ota_->Activate();
+        if (activation == ESP_OK) {
+            return;
+        }
+        if (activation != ESP_ERR_TIMEOUT) {
+            ESP_LOGW(TAG, "Display enrollment failed: %s", esp_err_to_name(activation));
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(3000));
+    }
+    ESP_LOGW(TAG, "Display enrollment remains pending; feed will use cache");
 }
 
 void Application::CheckAssetsVersion() {
@@ -547,15 +663,17 @@ void Application::CheckNewVersion() {
 void Application::InitializeProtocol() {
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    ESP_LOGI(TAG, "Display-only mode: voice protocol disabled");
+    protocol_.reset();
+    display->SetStatus("PORTFOLIO");
+    return;
+#else
     auto codec = board.GetAudioCodec();
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
-#if CONFIG_SYMBIOS_DISPLAY_ONLY
-    ESP_LOGI(TAG, "Display-only mode: cloud voice protocol disabled");
-    protocol_.reset();
-    return;
-#elif defined(CONFIG_SYMBIOS_VOICE_GATEWAY)
+#ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
     if (!ota_->HasWebsocketConfig()) {
         // Fail closed: the Symbios build must never fall back to cached or
         // factory MQTT credentials when bootstrap/authentication is missing.
@@ -618,11 +736,10 @@ void Application::InitializeProtocol() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
-#if CONFIG_SYMBIOS_SINGLE_TURN
-                        ESP_LOGI(TAG, "Symbios response complete; closing on-demand audio channel");
-                        if (protocol_ && protocol_->IsAudioChannelOpened()) {
-                            protocol_->CloseAudioChannel();
-                        }
+#ifdef CONFIG_SYMBIOS_VOICE_GATEWAY
+                        // Symbios is wake-driven and single-turn. Keep the
+                        // authenticated channel warm, but return the UI and
+                        // microphone to true standby after each reply.
                         SetDeviceState(kDeviceStateIdle);
 #else
                         if (listening_mode_ == kListeningModeManualStop) {
@@ -702,9 +819,29 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->Start();
+#endif
 }
 
 void Application::ShowActivationCode(const std::string& code, const std::string& message) {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    TerminalCard card;
+    card.kind = TerminalCardKind::kNarrative;
+    card.tone = TerminalCardTone::kWarning;
+    card.status = "SETUP";
+    card.eyebrow = "DEVICE ENROLLMENT";
+    card.title = "SYMBIOS TERMINAL";
+    card.primary = code.empty() ? message : "CODE " + code;
+    card.change_label = "MODE";
+    card.change = "READ ONLY";
+    card.left_label = "AUDIO";
+    card.left_value = "DISABLED";
+    card.right_label = "RETRY";
+    card.right_value = "BOUNDED";
+    card.footer = "AUTHORIZE ONCE | NO PROVIDER KEYS";
+    card.page_index = 0;
+    card.page_count = 1;
+    Board::GetInstance().GetDisplay()->SetTerminalCard(card);
+#else
     struct digit_sound {
         char digit;
         const std::string_view& sound;
@@ -732,23 +869,36 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
             audio_service_.PlaySound(it->sound);
         }
     }
+#endif
 }
 
 void Application::Alert(const char* status, const char* message, const char* emotion, const std::string_view& sound) {
     ESP_LOGW(TAG, "Alert [%s] %s: %s", emotion, status, message);
     auto display = Board::GetInstance().GetDisplay();
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    (void)sound;
+    // Keep the dashboard as the sole visual owner. Background failures are
+    // logged and reflected in its stale/offline state instead of replacing it
+    // with the generic chat/emoji layer.
+    display->SetStatus(status);
+    return;
+#else
     display->SetStatus(status);
     display->SetEmotion(emotion);
     display->SetChatMessage("system", message);
     if (!sound.empty()) {
         audio_service_.PlaySound(sound);
     }
+#endif
 }
 
 void Application::DismissAlert() {
     if (GetDeviceState() == kDeviceStateIdle) {
         auto display = Board::GetInstance().GetDisplay();
-#if CONFIG_SYMBIOS_VOICE_GATEWAY
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+        display->SetStatus("PORTFOLIO");
+        return;
+#elif CONFIG_SYMBIOS_VOICE_GATEWAY
         display->SetStatus("SYMBIOS");
 #else
         display->SetStatus(Lang::Strings::STANDBY);
@@ -759,15 +909,27 @@ void Application::DismissAlert() {
 }
 
 void Application::ToggleChatState() {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    ESP_LOGI(TAG, "Display-only mode ignored chat toggle");
+#else
     xEventGroupSetBits(event_group_, MAIN_EVENT_TOGGLE_CHAT);
+#endif
 }
 
 void Application::StartListening() {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    ESP_LOGI(TAG, "Display-only mode ignored listen request");
+#else
     xEventGroupSetBits(event_group_, MAIN_EVENT_START_LISTENING);
+#endif
 }
 
 void Application::StopListening() {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    ESP_LOGI(TAG, "Display-only mode ignored submit request");
+#else
     xEventGroupSetBits(event_group_, MAIN_EVENT_STOP_LISTENING);
+#endif
 }
 
 void Application::HandleToggleChatEvent() {
@@ -938,43 +1100,6 @@ void Application::HandleAutoStopListeningEvent() {
 }
 #endif
 
-#if CONFIG_SYMBIOS_VOICE_GATEWAY
-void Application::ArmSymbiosIdleTimer() {
-    if (symbios_idle_timer_handle_ == nullptr) {
-        return;
-    }
-    esp_timer_stop(symbios_idle_timer_handle_);
-    const uint64_t timeout_us =
-        static_cast<uint64_t>(CONFIG_SYMBIOS_LISTEN_IDLE_TIMEOUT_MS) * 1000ULL;
-    esp_err_t error = esp_timer_start_once(symbios_idle_timer_handle_, timeout_us);
-    if (error != ESP_OK) {
-        ESP_LOGW(TAG, "Unable to arm Symbios idle timer: %s", esp_err_to_name(error));
-    }
-}
-
-void Application::StopSymbiosIdleTimer() {
-    if (symbios_idle_timer_handle_ != nullptr) {
-        esp_timer_stop(symbios_idle_timer_handle_);
-    }
-}
-
-void Application::HandleSymbiosIdleTimeoutEvent() {
-    if (GetDeviceState() != kDeviceStateListening) {
-        return;
-    }
-    if (audio_service_.IsVoiceDetected()) {
-        ArmSymbiosIdleTimer();
-        return;
-    }
-
-    ESP_LOGI(TAG, "Symbios listen idle timeout; closing audio channel");
-    if (protocol_ && protocol_->IsAudioChannelOpened()) {
-        protocol_->CloseAudioChannel();
-    }
-    SetDeviceState(kDeviceStateIdle);
-}
-#endif
-
 void Application::HandleWakeWordDetectedEvent() {
     if (!protocol_) {
         return;
@@ -1022,8 +1147,10 @@ void Application::HandleWakeWordDetectedEvent() {
 }
 
 void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
-    // Check state again in case it was changed during scheduling
-    if (GetDeviceState() != kDeviceStateConnecting) {
+    // A cold channel enters Connecting before this continuation. A prewarmed
+    // channel remains Idle and must be allowed to continue immediately.
+    auto state = GetDeviceState();
+    if (state != kDeviceStateConnecting && state != kDeviceStateIdle) {
         return;
     }
 
@@ -1058,11 +1185,33 @@ void Application::HandleStateChangedEvent() {
     DeviceState new_state = state_machine_.GetState();
     clock_ticks_ = 0;
 
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    {
+        auto display = Board::GetInstance().GetDisplay();
+        switch (new_state) {
+            case kDeviceStateStarting:
+                display->SetStatus("STARTING");
+                break;
+            case kDeviceStateActivating:
+                display->SetStatus("SYNCING");
+                break;
+            case kDeviceStateIdle:
+                display->SetStatus("PORTFOLIO");
+                break;
+            case kDeviceStateWifiConfiguring:
+                display->SetStatus("WIFI SETUP");
+                break;
+            default:
+                ESP_LOGW(TAG, "Display-only mode ignored state %d", static_cast<int>(new_state));
+                SetDeviceState(kDeviceStateIdle);
+                break;
+        }
+    }
+    return;
+#endif
+
 #if CONFIG_SYMBIOS_AUTO_SUBMIT_ON_SILENCE
     ResetAutoSubmitState();
-#endif
-#if CONFIG_SYMBIOS_VOICE_GATEWAY
-    StopSymbiosIdleTimer();
 #endif
 
     auto& board = Board::GetInstance();
@@ -1099,7 +1248,16 @@ void Application::HandleStateChangedEvent() {
                 if (listening_mode_ == kListeningModeAutoStop) {
                     audio_service_.WaitForPlaybackQueueEmpty();
                 }
-                
+
+                // Play the acknowledgement before opening the microphone so
+                // the board's own speaker cannot hold local VAD in speech.
+                if (play_popup_on_listening_) {
+                    play_popup_on_listening_ = false;
+                    audio_service_.ResetDecoder();
+                    audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
+                    audio_service_.WaitForPlaybackQueueEmpty();
+                }
+
                 // Send the start listening command
                 protocol_->SendStartListening(listening_mode_);
                 audio_service_.EnableVoiceProcessing(true);
@@ -1113,14 +1271,6 @@ void Application::HandleStateChangedEvent() {
             audio_service_.EnableWakeWordDetection(false);
 #endif
             
-            // Play popup sound after ResetDecoder (in EnableVoiceProcessing) has been called
-            if (play_popup_on_listening_) {
-                play_popup_on_listening_ = false;
-                audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
-            }
-#if CONFIG_SYMBIOS_VOICE_GATEWAY
-            ArmSymbiosIdleTimer();
-#endif
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
@@ -1174,13 +1324,21 @@ void Application::Reboot() {
         protocol_->CloseAudioChannel();
     }
     protocol_.reset();
+#if !CONFIG_SYMBIOS_DISPLAY_ONLY
     audio_service_.Stop();
+#endif
 
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
 }
 
 bool Application::UpgradeFirmware(const std::string& url, const std::string& version) {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    (void)url;
+    (void)version;
+    ESP_LOGW(TAG, "Automatic and remote firmware upgrades are disabled in display-only mode");
+    return false;
+#else
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
 
@@ -1230,9 +1388,14 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
         Reboot();
         return true;
     }
+#endif
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    (void)wake_word;
+    return;
+#else
     if (!protocol_) {
         return;
     }
@@ -1263,9 +1426,14 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             }
         });
     }
+#endif
 }
 
 bool Application::CanEnterSleepMode() {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    // The desk terminal keeps the display and carousel alive while powered.
+    return false;
+#else
     if (GetDeviceState() != kDeviceStateIdle) {
         return false;
     }
@@ -1280,6 +1448,7 @@ bool Application::CanEnterSleepMode() {
 
     // Now it is safe to enter sleep mode
     return true;
+#endif
 }
 
 void Application::SendMcpMessage(const std::string& payload) {
@@ -1292,6 +1461,10 @@ void Application::SendMcpMessage(const std::string& payload) {
 }
 
 void Application::SetAecMode(AecMode mode) {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    (void)mode;
+    return;
+#else
     aec_mode_ = mode;
     Schedule([this]() {
         auto& board = Board::GetInstance();
@@ -1316,11 +1489,37 @@ void Application::SetAecMode(AecMode mode) {
             protocol_->CloseAudioChannel();
         }
     });
+#endif
 }
 
 void Application::PlaySound(const std::string_view& sound) {
+#if CONFIG_SYMBIOS_DISPLAY_ONLY
+    (void)sound;
+    ESP_LOGI(TAG, "Display-only mode suppressed sound request");
+#else
     audio_service_.PlaySound(sound);
+#endif
 }
+
+#if CONFIG_SYMBIOS_TERMINAL_TICKER
+void Application::NextTerminalCard() {
+    if (terminal_feed_) {
+        terminal_feed_->NextCard();
+    }
+}
+
+void Application::PreviousTerminalCard() {
+    if (terminal_feed_) {
+        terminal_feed_->PreviousCard();
+    }
+}
+
+void Application::RefreshTerminalFeed() {
+    if (terminal_feed_) {
+        terminal_feed_->RefreshNow();
+    }
+}
+#endif
 
 void Application::ResetProtocol() {
     Schedule([this]() {
