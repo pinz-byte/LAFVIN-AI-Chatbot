@@ -104,10 +104,10 @@ jobs:
             "${diagnostic_args[@]}"
           python3 scripts/release.py lafvin-aichatbot \
             -c config.symbios.local.json \
-            --name lafvin-aichatbot-symbios-terminal
+            --name lafvin-aichatbot-symbios-display-v1
           sha256sum \
             build/merged-binary.bin \
-            releases/v2.2.4_lafvin-aichatbot-symbios-terminal.zip \
+            releases/v2.2.4_lafvin-aichatbot-symbios-display-v1.zip \
             > firmware-review-sha256.txt
       - name: Upload review artifacts
         uses: actions/upload-artifact@v4
@@ -117,5 +117,5 @@ jobs:
             xiaozhi-esp32-main/build/merged-binary.bin
             xiaozhi-esp32-main/build/flasher_args.json
             xiaozhi-esp32-main/firmware-review-sha256.txt
-            xiaozhi-esp32-main/releases/v2.2.4_lafvin-aichatbot-symbios-terminal.zip
+            xiaozhi-esp32-main/releases/v2.2.4_lafvin-aichatbot-symbios-display-v1.zip
           if-no-files-found: error
