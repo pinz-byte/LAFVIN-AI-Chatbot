@@ -176,6 +176,16 @@ bool IsStatus(const char* value) {
         std::strcmp(value, "OFFLINE") == 0);
 }
 
+bool IsDisplayStatus(const char* value) {
+    return value != nullptr && (
+        std::strcmp(value, "LIVE") == 0 ||
+        std::strcmp(value, "PREMARKET") == 0 ||
+        std::strcmp(value, "LAST CLOSE") == 0 ||
+        std::strcmp(value, "DELAYED") == 0 ||
+        std::strcmp(value, "STALE") == 0 ||
+        std::strcmp(value, "OFFLINE") == 0);
+}
+
 bool IsSymbol(const char* value) {
     if (value == nullptr) {
         return false;
@@ -535,16 +545,22 @@ bool TerminalFeed::ParsePayload(const std::string& payload, std::vector<Terminal
 
     const cJSON* schema = cJSON_GetObjectItemCaseSensitive(root, "schema_version");
     const cJSON* status = cJSON_GetObjectItemCaseSensitive(root, "status");
+    const cJSON* display_status = cJSON_GetObjectItemCaseSensitive(root, "display_status");
     const cJSON* generated = cJSON_GetObjectItemCaseSensitive(root, "generated_at");
     const cJSON* received = cJSON_GetObjectItemCaseSensitive(root, "received_at");
     if (!cJSON_IsNumber(schema) || (schema->valueint != 1 && schema->valueint != 2) ||
         !IsBoundedString(status, 8) || !IsStatus(status->valuestring) ||
+        (display_status != nullptr &&
+         (!IsBoundedString(display_status, 12) ||
+          !IsDisplayStatus(display_status->valuestring))) ||
         !IsBoundedString(generated, 40) || !IsBoundedString(received, 40)) {
         cJSON_Delete(root);
         return false;
     }
 
-    const std::string status_text = status->valuestring;
+    const std::string status_text = display_status != nullptr
+                                        ? display_status->valuestring
+                                        : status->valuestring;
 
     const cJSON* events = cJSON_GetObjectItemCaseSensitive(root, "events");
     if (events != nullptr) {

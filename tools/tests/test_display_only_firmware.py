@@ -132,3 +132,13 @@ def test_terminal_feed_is_bounded_fail_soft_and_overlap_safe() -> None:
     assert "lv_label_set_long_mode(ticker_primary_label_, LV_LABEL_LONG_DOT);" in display
     assert "ticker title and primary bands must not overlap" in display
     assert "ticker primary and readout bands must not overlap" in display
+
+
+def test_display_status_is_optional_and_backward_compatible() -> None:
+    source = (FIRMWARE / "terminal_feed.cc").read_text()
+
+    assert "bool IsDisplayStatus(const char* value)" in source
+    assert 'std::strcmp(value, "LAST CLOSE") == 0' in source
+    assert 'cJSON_GetObjectItemCaseSensitive(root, "display_status")' in source
+    assert "display_status != nullptr" in source
+    assert ": status->valuestring;" in source
