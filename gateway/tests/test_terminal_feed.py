@@ -141,6 +141,7 @@ def test_ingest_auth_replay_and_device_auth(tmp_path: Path) -> None:
         assert feed_response.headers["cache-control"] == "no-store"
         feed = feed_response.json()
         assert feed["status"] == "LIVE"
+        assert feed["display_status"] == "LIVE"
         assert feed["btc"]["symbol"] == "BTC-USD"
         assert feed["rows"] == [
             {
@@ -174,6 +175,7 @@ def test_stale_decay_and_coinbase_failure_are_explicit(tmp_path: Path) -> None:
             headers={**DEVICE_HEADERS, "Authorization": f"Device {token}"},
         ).json()
         assert feed["status"] == "STALE"
+        assert feed["display_status"] == "STALE"
         assert feed["btc"] is None
 
 
@@ -181,6 +183,7 @@ def test_offline_payload_has_no_fabricated_apex_values() -> None:
     at = datetime(2026, 8, 10, 20, 0, tzinfo=timezone.utc)
     feed = build_terminal_feed(None, btc=None, now=at)
     assert feed["status"] == "OFFLINE"
+    assert feed["display_status"] == "OFFLINE"
     assert feed["apex"] is None
     assert feed["rows"] == []
     assert feed["events"] == []
@@ -195,6 +198,26 @@ def test_market_phase_is_allow_listed_for_close_and_weekend_rendering() -> None:
     normalized, _ = parse_apex_snapshot(json.dumps(source).encode(), now=now)
 
     assert normalized["apex"]["market_phase"] == "weekend"
+
+    normalized["received_at"] = now.isoformat()
+    feed = build_terminal_feed(json.dumps(normalized), btc=None, now=now)
+    assert feed["status"] == "LIVE"
+    assert feed["display_status"] == "LAST CLOSE"
+
+
+def test_display_status_uses_quote_freshness_not_only_snapshot_freshness() -> None:
+    now = datetime(2026, 8, 31, 15, 30, tzinfo=timezone.utc)
+    source = payload(now)
+    source["schema_version"] = 2
+    source["apex"]["market_phase"] = "intraday"
+    source["rows"][0]["source_at"] = (now - timedelta(minutes=11)).isoformat()
+    normalized, _ = parse_apex_snapshot(json.dumps(source).encode(), now=now)
+    normalized["received_at"] = now.isoformat()
+
+    feed = build_terminal_feed(json.dumps(normalized), btc=None, now=now)
+
+    assert feed["status"] == "LIVE"
+    assert feed["display_status"] == "STALE"
 
 
 def test_schema_two_events_are_prioritized_bounded_and_expiry_gated() -> None:

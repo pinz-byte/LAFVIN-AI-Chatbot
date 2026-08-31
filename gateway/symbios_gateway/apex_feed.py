@@ -259,6 +259,41 @@ def _freshness(source_at: datetime, now: datetime) -> str:
     return "STALE"
 
 
+def _display_status(
+    transport_status: str,
+    apex: object,
+    rows: object,
+    *,
+    now: datetime,
+) -> str:
+    """Separate feed health from the market state shown on the device."""
+    if transport_status != "LIVE":
+        return transport_status
+    if not isinstance(apex, Mapping):
+        return "LIVE"
+    phase = apex.get("market_phase")
+    if phase in {"eod", "closed", "weekend"}:
+        return "LAST CLOSE"
+
+    row_times: list[datetime] = []
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            try:
+                row_times.append(_parse_timestamp(row.get("source_at"), "rows.source_at"))
+            except ApexFeedError:
+                continue
+    market_freshness = (
+        _freshness(min(row_times), now) if row_times else transport_status
+    )
+    if market_freshness != "LIVE":
+        return market_freshness
+    if phase == "premarket":
+        return "PREMARKET"
+    return "LIVE"
+
+
 def build_terminal_feed(
     stored_json: str | None,
     *,
@@ -272,6 +307,7 @@ def build_terminal_feed(
             "generated_at": current.isoformat(),
             "received_at": current.isoformat(),
             "status": "OFFLINE",
+            "display_status": "OFFLINE",
             "btc": btc,
             "apex": None,
             "rows": [],
@@ -288,14 +324,17 @@ def build_terminal_feed(
     except (ApexFeedError, KeyError, TypeError, json.JSONDecodeError) as exc:
         raise ApexFeedError("stored feed is invalid") from exc
     status = _freshness(generated, current)
+    apex = stored.get("apex")
+    rows = stored.get("rows", [])
     feed = {
         "schema_version": stored.get("schema_version", 1),
         "generated_at": generated.isoformat(),
         "received_at": received_at.isoformat(),
         "status": status,
+        "display_status": _display_status(status, apex, rows, now=current),
         "btc": btc,
-        "apex": stored.get("apex"),
-        "rows": stored.get("rows", []),
+        "apex": apex,
+        "rows": rows,
         "events": (
             select_terminal_intentions(stored.get("events", []), current=current)
             if status != "STALE" else []
