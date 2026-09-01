@@ -99,6 +99,7 @@ def test_display_only_source_never_initializes_voice_or_speaker() -> None:
     board = (
         FIRMWARE / "boards" / "lafvin-aichatbot" / "lafvin-aichatbot.cc"
     ).read_text()
+    display = (FIRMWARE / "display" / "lvgl_display" / "lvgl_display.cc").read_text()
 
     assert "#if !CONFIG_SYMBIOS_DISPLAY_ONLY\n    auto codec = board.GetAudioCodec();" in application
     assert "Display-only mode: voice protocol disabled" in application
@@ -107,6 +108,8 @@ def test_display_only_source_never_initializes_voice_or_speaker() -> None:
     assert "gpio_set_level(pa_en_pin_, 0);" in board
     assert "Audio codec requested by display-only firmware" in board
     assert "return nullptr;" in board
+    assert "#if !CONFIG_SYMBIOS_DISPLAY_ONLY\n    auto codec = board.GetAudioCodec();" in display
+    assert "#if !CONFIG_SYMBIOS_DISPLAY_ONLY\n                    app.Schedule([&app]()" in display
 
 
 def test_display_only_bootstrap_discards_voice_and_update_destinations() -> None:

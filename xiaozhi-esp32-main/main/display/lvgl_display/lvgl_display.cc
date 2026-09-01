@@ -113,6 +113,8 @@ void LvglDisplay::ShowNotification(const char* notification, int duration_ms) {
 void LvglDisplay::UpdateStatusBar(bool update_all) {
     auto& app = Application::GetInstance();
     auto& board = Board::GetInstance();
+
+#if !CONFIG_SYMBIOS_DISPLAY_ONLY
     auto codec = board.GetAudioCodec();
 
     // Update mute icon
@@ -131,6 +133,7 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
             lv_label_set_text(mute_label_, "");
         }
     }
+#endif
 
     // Update time
     if (app.GetDeviceState() == kDeviceStateIdle) {
@@ -180,9 +183,11 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
             if (strcmp(icon, FONT_AWESOME_BATTERY_EMPTY) == 0 && discharging) {
                 if (lv_obj_has_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN)) { // Show if low battery popup is hidden
                     lv_obj_remove_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
+#if !CONFIG_SYMBIOS_DISPLAY_ONLY
                     app.Schedule([&app]() {
                         app.PlaySound(Lang::Sounds::OGG_LOW_BATTERY);
                     });
+#endif
                 }
             } else {
                 // Hide the low battery popup when the battery is not empty
