@@ -106,6 +106,7 @@ jobs:
             -c config.symbios.local.json \
             --name lafvin-aichatbot-symbios-display-v1
           sha256sum \
+            build/xiaozhi.bin \
             build/merged-binary.bin \
             releases/v2.2.4_lafvin-aichatbot-symbios-display-v1.zip \
             > firmware-review-sha256.txt
@@ -114,8 +115,10 @@ jobs:
         with:
           name: lafvin-aichatbot-symbios-diagnostic-review
           path: |
+            xiaozhi-esp32-main/build/xiaozhi.bin
             xiaozhi-esp32-main/build/merged-binary.bin
             xiaozhi-esp32-main/build/flasher_args.json
+            xiaozhi-esp32-main/sdkconfig
             xiaozhi-esp32-main/firmware-review-sha256.txt
             xiaozhi-esp32-main/releases/v2.2.4_lafvin-aichatbot-symbios-display-v1.zip
           if-no-files-found: error
