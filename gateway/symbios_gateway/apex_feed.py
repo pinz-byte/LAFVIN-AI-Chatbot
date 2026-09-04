@@ -326,6 +326,10 @@ def build_terminal_feed(
     status = _freshness(generated, current)
     apex = stored.get("apex")
     rows = stored.get("rows", [])
+    market_phase = (
+        str(apex.get("market_phase", "unknown"))
+        if isinstance(apex, Mapping) else "unknown"
+    )
     feed = {
         "schema_version": stored.get("schema_version", 1),
         "generated_at": generated.isoformat(),
@@ -336,7 +340,11 @@ def build_terminal_feed(
         "apex": apex,
         "rows": rows,
         "events": (
-            select_terminal_intentions(stored.get("events", []), current=current)
+            select_terminal_intentions(
+                stored.get("events", []),
+                current=current,
+                market_phase=market_phase,
+            )
             if status != "STALE" else []
         ),
         "sources": stored.get("sources", _parse_sources(None)),

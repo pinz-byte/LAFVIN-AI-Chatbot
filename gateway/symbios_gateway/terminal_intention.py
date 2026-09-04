@@ -32,12 +32,14 @@ def intention_category(event: Mapping[str, object]) -> str:
     kind = str(event.get("kind", "")).upper()
     source = str(event.get("source", "")).upper()
     title = str(event.get("title", "")).upper()
-    if title == "SIGNAL BOARD":
+    if title in {"SIGNAL BOARD", "CARRY SIGNALS", "WEEKEND SIGNALS"}:
         return "signal_board"
-    if title == "MARKET MOVERS":
+    if title in {"MARKET MOVERS", "CLOSE MOVERS", "LAST CLOSE MOVERS", "LAST SESSION MOVERS"}:
         return "market_movers"
-    if title == "TECHNICAL EXTREMES":
+    if title in {"TECHNICAL EXTREMES", "CLOSE EXTREMES", "LAST SESSION EXTREMES"}:
         return "technical_extremes"
+    if source == "SCHWAB PORTFOLIO":
+        return "portfolio_close"
     if kind in {"TRADE", "RISK"}:
         return "interrupt"
     if kind == "BRIEF" and source == "APEX MARKET":
@@ -144,6 +146,7 @@ def select_terminal_intentions(
     value: object,
     *,
     current: datetime,
+    market_phase: str = "unknown",
     limit: int = MAX_INTENTIONS,
 ) -> list[dict[str, object]]:
     """Build a compact editorial queue from verified event facts.
@@ -181,6 +184,16 @@ def select_terminal_intentions(
             return
         selected.append({key: item for key, item in event.items() if key != "_intent"})
 
+    phase = market_phase if market_phase in {
+        "premarket", "intraday", "eod", "closed", "weekend", "unknown"
+    } else "unknown"
+    labels = {
+        "eod": ("CARRY SIGNALS", "CLOSE MOVERS", "CLOSE EXTREMES"),
+        "closed": ("CARRY SIGNALS", "LAST CLOSE MOVERS", "CLOSE EXTREMES"),
+        "weekend": ("WEEKEND SIGNALS", "LAST SESSION MOVERS", "LAST SESSION EXTREMES"),
+    }.get(phase, ("SIGNAL BOARD", "MARKET MOVERS", "TECHNICAL EXTREMES"))
+    signal_title, mover_title, technical_title = labels
+
     interrupt = next(
         (
             event for event in candidates
@@ -191,24 +204,24 @@ def select_terminal_intentions(
         None,
     )
     append(interrupt)
-    append(best("market"))
 
     buy, sell = best("buy"), best("sell")
     signal_parts = [part for part in (_signal_phrase(buy, "BUY"), _signal_phrase(sell, "SELL")) if part]
     signal_events = [event for event in (buy, sell) if event is not None]
+    signal_board = None
     if signal_events:
         active = sum(
             str(event.get("metric_label", "")).upper() == "SIGNAL" for event in signal_events
         )
-        append(_board_event(
+        signal_board = _board_event(
             prefix="signal-board",
-            title="SIGNAL BOARD",
+            title=signal_title,
             body=" | ".join(signal_parts),
             metric_label="ACTIVE",
             metric_value=str(active),
             source="APEX SIGNAL",
             events=signal_events,
-        ))
+        )
 
     mover_up, mover_down = best("mover_up"), best("mover_down")
     mover_parts = [
@@ -216,33 +229,61 @@ def select_terminal_intentions(
         if part
     ]
     mover_events = [event for event in (mover_up, mover_down) if event is not None]
+    mover_board = None
     if mover_events:
-        append(_board_event(
+        mover_board = _board_event(
             prefix="market-movers",
-            title="MARKET MOVERS",
+            title=mover_title,
             body=" | ".join(mover_parts),
             metric_label="DIRECTION",
             metric_value="UP / DOWN" if len(mover_events) == 2 else "ONE SIDE",
             source="APEX MARKET",
             events=mover_events,
-        ))
+        )
 
     oversold, overbought = best("oversold"), best("overbought")
     technical_parts = [
         part for part in (_rsi_phrase(oversold, "OS"), _rsi_phrase(overbought, "OB")) if part
     ]
     technical_events = [event for event in (oversold, overbought) if event is not None]
+    technical_board = None
     if technical_events:
-        append(_board_event(
+        technical_board = _board_event(
             prefix="technical",
-            title="TECHNICAL EXTREMES",
+            title=technical_title,
             body=" | ".join(technical_parts),
             metric_label="RSI",
             metric_value=str(len(technical_events)),
             source="APEX TECHNICAL",
             events=technical_events,
-        ))
+        )
 
-    for category in ("news", "council", "briefing", "other"):
-        append(best(category))
+    cards = {
+        "market": best("market"),
+        "portfolio": best("portfolio_close"),
+        "signals": signal_board,
+        "movers": mover_board,
+        "technical": technical_board,
+        "news": best("news"),
+        "council": best("council"),
+        "briefing": best("briefing"),
+        "other": best("other"),
+    }
+    if phase == "eod":
+        order = (
+            "market", "portfolio", "movers", "signals", "news",
+            "council", "briefing", "technical", "other",
+        )
+    elif phase in {"closed", "weekend"}:
+        order = (
+            "market", "portfolio", "news", "council", "briefing",
+            "signals", "movers", "technical", "other",
+        )
+    else:
+        order = (
+            "market", "signals", "movers", "technical", "news",
+            "council", "briefing", "other",
+        )
+    for name in order:
+        append(cards[name])
     return selected

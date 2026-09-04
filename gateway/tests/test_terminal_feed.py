@@ -205,6 +205,53 @@ def test_market_phase_is_allow_listed_for_close_and_weekend_rendering() -> None:
     assert feed["display_status"] == "LAST CLOSE"
 
 
+def test_feed_passes_closed_phase_into_post_close_editorial_profile() -> None:
+    now = datetime(2026, 8, 18, 2, 0, tzinfo=timezone.utc)
+    expires = (now + timedelta(hours=8)).isoformat()
+
+    def close_event(identity: str, kind: str, title: str, **extra: object) -> dict[str, object]:
+        return {
+            "id": identity,
+            "kind": kind,
+            "priority": int(extra.pop("priority", 70)),
+            "title": title,
+            "body": str(extra.pop("body", "Verified close fact.")),
+            "source": str(extra.pop("source", "APEX")),
+            "source_at": now.isoformat(),
+            "expires_at": expires,
+            "freshness": "FRESH",
+            **extra,
+        }
+
+    stored = {
+        "schema_version": 2,
+        "generated_at": now.isoformat(),
+        "received_at": now.isoformat(),
+        "apex": {"source_at": now.isoformat(), "market_phase": "closed"},
+        "rows": [],
+        "events": [
+            close_event("market", "BRIEF", "NIGHT WATCH · AUG 17", source="APEX MARKET"),
+            close_event("portfolio", "INFO", "PORTFOLIO AT CLOSE", source="SCHWAB PORTFOLIO"),
+            close_event("up", "MOVER_UP", "TOP GAINER", symbol="AAPL", change_pct=2.1),
+            close_event("down", "MOVER_DOWN", "TOP LOSER", symbol="TSLA", change_pct=-1.4),
+            close_event("buy", "INFO", "BUY SIGNAL", symbol="NVDA", metric_label="SIGNAL", metric_value="BUY"),
+        ],
+        "sources": {
+            "council": {"status": "MISSING", "source_at": None},
+            "slack": {"status": "MISSING", "source_at": None},
+        },
+    }
+
+    feed = build_terminal_feed(json.dumps(stored), btc=None, now=now)
+
+    assert [event["title"] for event in feed["events"]] == [
+        "NIGHT WATCH · AUG 17",
+        "PORTFOLIO AT CLOSE",
+        "CARRY SIGNALS",
+        "LAST CLOSE MOVERS",
+    ]
+
+
 def test_display_status_uses_quote_freshness_not_only_snapshot_freshness() -> None:
     now = datetime(2026, 8, 31, 15, 30, tzinfo=timezone.utc)
     source = payload(now)

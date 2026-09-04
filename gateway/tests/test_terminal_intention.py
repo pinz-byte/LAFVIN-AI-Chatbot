@@ -41,6 +41,9 @@ def test_categories_are_human_intentions_not_transport_states() -> None:
         metric_label="STATUS", metric_value="NONE ACTIVE",
     )) == "sell"
     assert intention_category(event("r", "OVERBOUGHT", "RSI")) == "overbought"
+    assert intention_category(event(
+        "p", "INFO", "PORTFOLIO CLOSE", source="SCHWAB PORTFOLIO"
+    )) == "portfolio_close"
 
 
 def test_builder_combines_paired_states_into_glanceable_decision_cards() -> None:
@@ -70,6 +73,66 @@ def test_builder_combines_paired_states_into_glanceable_decision_cards() -> None
     assert next(item for item in selected if item["title"] == "MARKET MOVERS")["body"] == (
         "UP NBIS | DOWN META"
     )
+
+
+def test_post_close_profiles_change_priority_and_language_by_phase() -> None:
+    common = [
+        event("portfolio", "INFO", "PORTFOLIO CLOSE", source="SCHWAB PORTFOLIO"),
+        event("up", "MOVER_UP", "TOP GAINER", symbol="NBIS", change_pct=4.2),
+        event("down", "MOVER_DOWN", "TOP LOSER", symbol="META", change_pct=-3.1),
+        event("buy", "INFO", "BUY SIGNAL", symbol="HOOD", metric_label="SIGNAL", metric_value="BUY"),
+        event("sell", "INFO", "SELL SIGNAL", symbol="NVDA", metric_label="SIGNAL", metric_value="SELL"),
+        event("under", "OVERSOLD", "RSI", symbol="TSLA", metric_value="28.0"),
+        event("over", "OVERBOUGHT", "RSI", symbol="PLTR", metric_value="74.0"),
+        event("news", "BRIEF", "NEWS · CRWV", source="SEEKING ALPHA"),
+        event("council", "COUNCIL", "GO · ADD", symbol="HOOD"),
+        event("brief", "BRIEF", "CLOSE NOTE", source="APEX SLACK"),
+    ]
+
+    eod = select_terminal_intentions([
+        event("market-eod", "BRIEF", "CLOSING DESK · AUG 28", source="APEX MARKET"),
+        *common,
+    ], current=NOW, market_phase="eod")
+    assert [item["title"] for item in eod] == [
+        "CLOSING DESK · AUG 28",
+        "PORTFOLIO CLOSE",
+        "CLOSE MOVERS",
+        "CARRY SIGNALS",
+        "NEWS · CRWV",
+        "GO · ADD",
+        "CLOSE NOTE",
+        "CLOSE EXTREMES",
+    ]
+
+    closed = select_terminal_intentions([
+        event("market-closed", "BRIEF", "NIGHT WATCH · AUG 28", source="APEX MARKET"),
+        *common,
+    ], current=NOW, market_phase="closed")
+    assert [item["title"] for item in closed] == [
+        "NIGHT WATCH · AUG 28",
+        "PORTFOLIO CLOSE",
+        "NEWS · CRWV",
+        "GO · ADD",
+        "CLOSE NOTE",
+        "CARRY SIGNALS",
+        "LAST CLOSE MOVERS",
+        "CLOSE EXTREMES",
+    ]
+
+    weekend = select_terminal_intentions([
+        event("market-weekend", "BRIEF", "WEEKEND BRIEF · AUG 28", source="APEX MARKET"),
+        *common,
+    ], current=NOW, market_phase="weekend")
+    assert [item["title"] for item in weekend] == [
+        "WEEKEND BRIEF · AUG 28",
+        "PORTFOLIO CLOSE",
+        "NEWS · CRWV",
+        "GO · ADD",
+        "CLOSE NOTE",
+        "WEEKEND SIGNALS",
+        "LAST SESSION MOVERS",
+        "LAST SESSION EXTREMES",
+    ]
 
 
 def test_paper_filings_collapse_to_one_council_and_expired_facts_disappear() -> None:
