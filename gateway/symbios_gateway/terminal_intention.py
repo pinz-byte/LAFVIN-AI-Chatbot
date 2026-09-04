@@ -3,9 +3,36 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Mapping
+from zoneinfo import ZoneInfo
 
 
 MAX_INTENTIONS = 10
+NEW_YORK = ZoneInfo("America/New_York")
+
+
+def adaptive_terminal_mode(*, current: datetime, market_phase: str) -> str:
+    """Choose the terminal's job from market phase and New York wall time."""
+    now_et = current.astimezone(NEW_YORK)
+    minute = now_et.hour * 60 + now_et.minute
+    phase = market_phase if market_phase in {
+        "premarket", "intraday", "eod", "closed", "weekend", "unknown"
+    } else "unknown"
+
+    if phase == "intraday":
+        return "apex_live"
+    if phase == "premarket":
+        return "apex_live" if minute >= 6 * 60 else "quiet_intelligence"
+    if phase == "eod":
+        if minute < 18 * 60:
+            return "closing_desk"
+        if minute < 21 * 60:
+            return "portfolio_autopsy"
+        if minute < 23 * 60:
+            return "symbios_command"
+        return "quiet_intelligence"
+    if phase in {"closed", "weekend"}:
+        return "weekend_review" if 8 * 60 <= minute < 18 * 60 else "quiet_intelligence"
+    return "quiet_intelligence"
 
 
 def _timestamp(value: object) -> datetime | None:
@@ -142,6 +169,29 @@ def _rsi_phrase(event: dict[str, object] | None, label: str) -> str | None:
     return f"{label} {symbol} RSI {rsi}"
 
 
+def _mode_context_event(
+    event: dict[str, object] | None,
+    *,
+    terminal_mode: str,
+) -> dict[str, object] | None:
+    if event is None:
+        return None
+    output = dict(event)
+    previous = str(output.get("title", ""))
+    suffix = ""
+    if "·" in previous:
+        suffix = " · " + previous.split("·", 1)[1].strip()
+    output["title"] = {
+        "apex_live": "APEX LIVE",
+        "closing_desk": "CLOSING DESK",
+        "portfolio_autopsy": "PORTFOLIO AUTOPSY",
+        "symbios_command": "SYMBIOS COMMAND",
+        "weekend_review": "WEEKEND REVIEW",
+        "quiet_intelligence": "QUIET INTELLIGENCE",
+    }[terminal_mode] + suffix
+    return output
+
+
 def select_terminal_intentions(
     value: object,
     *,
@@ -177,16 +227,22 @@ def select_terminal_intentions(
     def best(category: str) -> dict[str, object] | None:
         return next((event for event in candidates if event.get("_intent") == category), None)
 
-    selected: list[dict[str, object]] = []
-
-    def append(event: dict[str, object] | None) -> None:
-        if event is None or len(selected) >= min(limit, MAX_INTENTIONS):
-            return
-        selected.append({key: item for key, item in event.items() if key != "_intent"})
-
     phase = market_phase if market_phase in {
         "premarket", "intraday", "eod", "closed", "weekend", "unknown"
     } else "unknown"
+    terminal_mode = adaptive_terminal_mode(current=now, market_phase=phase)
+    effective_limit = min(
+        limit,
+        MAX_INTENTIONS,
+        4 if terminal_mode == "quiet_intelligence" else MAX_INTENTIONS,
+    )
+    selected: list[dict[str, object]] = []
+
+    def append(event: dict[str, object] | None) -> None:
+        if event is None or len(selected) >= effective_limit:
+            return
+        selected.append({key: item for key, item in event.items() if key != "_intent"})
+
     labels = {
         "eod": ("CARRY SIGNALS", "CLOSE MOVERS", "CLOSE EXTREMES"),
         "closed": ("CARRY SIGNALS", "LAST CLOSE MOVERS", "CLOSE EXTREMES"),
@@ -259,7 +315,7 @@ def select_terminal_intentions(
         )
 
     cards = {
-        "market": best("market"),
+        "market": _mode_context_event(best("market"), terminal_mode=terminal_mode),
         "portfolio": best("portfolio_close"),
         "signals": signal_board,
         "movers": mover_board,
@@ -269,21 +325,33 @@ def select_terminal_intentions(
         "briefing": best("briefing"),
         "other": best("other"),
     }
-    if phase == "eod":
-        order = (
-            "market", "portfolio", "movers", "signals", "news",
-            "council", "briefing", "technical", "other",
-        )
-    elif phase in {"closed", "weekend"}:
-        order = (
-            "market", "portfolio", "news", "council", "briefing",
-            "signals", "movers", "technical", "other",
-        )
-    else:
-        order = (
+    order_by_mode = {
+        "apex_live": (
             "market", "signals", "movers", "technical", "news",
             "council", "briefing", "other",
-        )
+        ),
+        "closing_desk": (
+            "market", "portfolio", "movers", "signals", "news",
+            "council", "briefing", "technical", "other",
+        ),
+        "portfolio_autopsy": (
+            "portfolio", "market", "movers", "technical", "signals",
+            "news", "council", "briefing", "other",
+        ),
+        "symbios_command": (
+            "market", "council", "briefing", "news", "signals",
+            "portfolio", "movers", "technical", "other",
+        ),
+        "weekend_review": (
+            "market", "portfolio", "news", "council", "briefing",
+            "signals", "movers", "technical", "other",
+        ),
+        "quiet_intelligence": (
+            "market", "portfolio", "news", "council", "briefing",
+            "signals", "movers", "technical", "other",
+        ),
+    }
+    order = order_by_mode[terminal_mode]
     for name in order:
         append(cards[name])
     return selected

@@ -184,6 +184,7 @@ def test_offline_payload_has_no_fabricated_apex_values() -> None:
     feed = build_terminal_feed(None, btc=None, now=at)
     assert feed["status"] == "OFFLINE"
     assert feed["display_status"] == "OFFLINE"
+    assert feed["terminal_mode"] == "quiet_intelligence"
     assert feed["apex"] is None
     assert feed["rows"] == []
     assert feed["events"] == []
@@ -203,6 +204,7 @@ def test_market_phase_is_allow_listed_for_close_and_weekend_rendering() -> None:
     feed = build_terminal_feed(json.dumps(normalized), btc=None, now=now)
     assert feed["status"] == "LIVE"
     assert feed["display_status"] == "LAST CLOSE"
+    assert feed["terminal_mode"] == "weekend_review"
 
 
 def test_feed_passes_closed_phase_into_post_close_editorial_profile() -> None:
@@ -245,11 +247,12 @@ def test_feed_passes_closed_phase_into_post_close_editorial_profile() -> None:
     feed = build_terminal_feed(json.dumps(stored), btc=None, now=now)
 
     assert [event["title"] for event in feed["events"]] == [
-        "NIGHT WATCH · AUG 17",
+        "QUIET INTELLIGENCE · AUG 17",
         "PORTFOLIO AT CLOSE",
         "CARRY SIGNALS",
         "LAST CLOSE MOVERS",
     ]
+    assert feed["terminal_mode"] == "quiet_intelligence"
 
 
 def test_display_status_uses_quote_freshness_not_only_snapshot_freshness() -> None:
@@ -382,7 +385,7 @@ def test_device_rotation_is_category_diverse_and_paper_fills_are_not_live_trades
         "schema_version": 2,
         "generated_at": now.isoformat(),
         "received_at": now.isoformat(),
-        "apex": {"source_at": now.isoformat()},
+        "apex": {"source_at": now.isoformat(), "market_phase": "intraday"},
         "rows": [],
         "events": events,
         "sources": {
@@ -394,7 +397,7 @@ def test_device_rotation_is_category_diverse_and_paper_fills_are_not_live_trades
     feed = build_terminal_feed(json.dumps(stored), btc=None, now=now)
 
     assert [item["title"] for item in feed["events"]] == [
-        "MARKET OPEN · 12:00 ET", "SIGNAL BOARD", "MARKET MOVERS",
+        "APEX LIVE · 12:00 ET", "SIGNAL BOARD", "MARKET MOVERS",
         "APEX MASTERS — Voice 0 filed: KTOS",
     ]
     assert sum(item["kind"] == "COUNCIL" for item in feed["events"]) == 1

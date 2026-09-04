@@ -6,7 +6,11 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Mapping
 
-from .terminal_intention import MAX_INTENTIONS, select_terminal_intentions
+from .terminal_intention import (
+    MAX_INTENTIONS,
+    adaptive_terminal_mode,
+    select_terminal_intentions,
+)
 
 
 MAX_FEED_BYTES = 8192
@@ -308,6 +312,7 @@ def build_terminal_feed(
             "received_at": current.isoformat(),
             "status": "OFFLINE",
             "display_status": "OFFLINE",
+            "terminal_mode": "quiet_intelligence",
             "btc": btc,
             "apex": None,
             "rows": [],
@@ -330,12 +335,14 @@ def build_terminal_feed(
         str(apex.get("market_phase", "unknown"))
         if isinstance(apex, Mapping) else "unknown"
     )
+    terminal_mode = adaptive_terminal_mode(current=current, market_phase=market_phase)
     feed = {
         "schema_version": stored.get("schema_version", 1),
         "generated_at": generated.isoformat(),
         "received_at": received_at.isoformat(),
         "status": status,
         "display_status": _display_status(status, apex, rows, now=current),
+        "terminal_mode": terminal_mode,
         "btc": btc,
         "apex": apex,
         "rows": rows,
